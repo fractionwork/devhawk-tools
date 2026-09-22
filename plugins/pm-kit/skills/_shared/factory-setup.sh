@@ -321,10 +321,126 @@ check_interop() {
   return 1
 }
 
-ubuntu_release() {
-  [ -r /etc/os-release ] || { echo ""; return; }
-  # shellcheck disable=SC1091
-  ( . /etc/os-release; echo "${VERSION_ID:-}" )
+# ── linux distro + package manager ──────────────────────────────────────────
+# This used to pin WSL to exactly Ubuntu 24.04 and speak only apt, on the theory
+# that package names and Python versions differ between releases and the
+# mismatches fail silently. The failures were real; the pin was the wrong fix.
+# It turned away 24.10, 25.04, 26.04 and Debian, all of which install fine, and
+# did nothing for native Linux, which was never pinned but got no packages at
+# all off apt. What actually protects against a silent mismatch is checking the
+# OUTCOME — is git here, is there a Python >= $PYTHON_MIN that can build a venv —
+# and that works on any distro. See verify_base.
+OS_RELEASE="${OS_RELEASE:-/etc/os-release}"
+
+# "Ubuntu 26.04 LTS", "Fedora Linux 42", ... — for messages only, never branched on.
+distro_label() {
+  [ -r "$OS_RELEASE" ] || { echo "unknown distro"; return; }
+  # shellcheck disable=SC1090
+  ( . "$OS_RELEASE"; echo "${PRETTY_NAME:-${NAME:-unknown} ${VERSION_ID:-}}" )
+}
+
+# Branch on the package manager actually present, not on the distro name: a
+# derivative (Mint, Pop!_OS, Rocky, Alma, Nobara, ...) reports its own ID but
+# ships its parent's tooling, and that tooling is what the commands depend on.
+# apt, dnf and pacman only, on purpose — they are what the team runs. Anything
+# else (zypper, NixOS, ...) gets told exactly what to install, and verify_base
+# still checks the result, so it is a manual step rather than a silent gap.
+pkg_manager() {
+  local m
+  for m in apt-get dnf pacman; do
+    have "$m" && { echo "$m"; return 0; }
+  done
+  return 1
+}
+
+# The base packages THIS machine still needs, in this manager's names.
+#
+# Only what is missing, rather than the full list every time. Installing what is
+# present is not harmless on Fedora: its default is curl-minimal, and
+# `dnf install curl` conflicts with it and fails the whole transaction — taking
+# git and python down with it over a curl that already worked.
+base_packages() {
+  local pm="$1" out=""
+  have git  || out="$out git"
+  have curl || out="$out curl"
+  if ! find_python >/dev/null; then
+    case "$pm" in
+      # RHEL/Rocky/Alma 9 keep python3 at 3.9 (dnf itself depends on it) and ship
+      # newer ones side by side; find_python picks python3.12 up by name.
+      dnf) if have python3; then out="$out python3.12"; else out="$out python3"; fi ;;
+      apt-get) out="$out python3" ;;
+      pacman) out="$out python" ;;
+    esac
+  fi
+  # Debian/Ubuntu split venv + ensurepip out of python3; Fedora ships them in it.
+  if [ "$pm" = "apt-get" ] && ! venv_python >/dev/null; then out="$out python3-venv"; fi
+  echo "${out# }"
+}
+
+# Install packages non-interactively with whichever manager is present.
+# sudo resets the environment by default, so the apt knobs are passed on the
+# command line: an exported DEBIAN_FRONTEND never reaches apt-get through sudo.
+pkg_install() {
+  local pm; pm="$(pkg_manager)" || return 1
+  [ $# -gt 0 ] || return 0
+  # Refresh once per run before the first install, whichever install that is. A
+  # box that needed no base packages would otherwise reach the wslu and pipx
+  # installs with stale or (fresh WSL images) empty apt lists.
+  [ "$PKG_REFRESHED" = "1" ] || pkg_refresh
+  case "$pm" in
+    apt-get) sudo DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a NEEDRESTART_SUSPEND=1 \
+               apt-get install -y -qq "$@" >/dev/null 2>&1 </dev/null ;;
+    dnf)     sudo dnf install -y -q "$@" >/dev/null 2>&1 </dev/null ;;
+    # -Syu, not -S: Arch supports no partial upgrades, and installing against a
+    # stale or freshly -Sy'd database can pull a package linked against libraries
+    # newer than the ones installed. Upgrading in the same transaction is the
+    # documented way. --needed keeps it a no-op for what is already current.
+    pacman)  sudo pacman -Syu --needed --noconfirm "$@" >/dev/null 2>&1 </dev/null ;;
+  esac
+}
+
+PKG_REFRESHED=0
+pkg_refresh() {
+  PKG_REFRESHED=1
+  case "$(pkg_manager)" in
+    apt-get) sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq >/dev/null 2>&1 </dev/null ;;
+    # dnf refreshes stale metadata on its own at install time, and pacman's
+    # refresh is folded into pkg_install's -Syu (a bare -Sy is a partial upgrade).
+    dnf|pacman) : ;;
+  esac
+}
+
+# A Python >= PYTHON_MIN that can actually build a venv. `import venv` is not
+# enough: Debian-family python3 without python3-venv imports venv fine and then
+# fails `python3 -m venv` for want of ensurepip — the silent mismatch the old
+# release pin was guarding against, caught directly instead.
+venv_python() {
+  local py; py="$(find_python)" || return 1
+  "$py" -c 'import venv, ensurepip' >/dev/null 2>&1 </dev/null || return 1
+  echo "$py"
+}
+
+# Check what phase_prereqs was for, whatever the distro did or didn't install.
+verify_base() {
+  local missing="" t
+  for t in git curl; do have "$t" || missing="$missing $t"; done
+  if [ -n "$missing" ]; then
+    bad "still missing:$missing"; note_fail "base packages:$missing"
+  else
+    ok "git, curl"
+  fi
+  local py
+  if py="$(venv_python)"; then
+    ok "python $("$py" -V 2>&1 | awk '{print $2}') with venv"
+  elif py="$(find_python)"; then
+    bad "$py cannot create a venv — pm-kit's /pm-setup needs one"
+    say "Debian/Ubuntu: sudo apt-get install python3-venv"
+    note_fail "python venv support"
+  else
+    bad "no python >= $PYTHON_MIN on PATH ($(distro_label))"
+    say "pm-kit's Asana MCP needs one; install python $PYTHON_MIN+ from your distro, or via uv/pyenv"
+    note_fail "python >= $PYTHON_MIN"
+  fi
 }
 
 # ── node ────────────────────────────────────────────────────────────────────
@@ -472,6 +588,9 @@ EOF
 report_state() {
   step "factory-setup — status only, nothing will be changed"
   say "platform: $PLATFORM"
+  if [ "$PLATFORM" != "macos" ]; then
+    say "distro: $(distro_label) · packages via $(pkg_manager || echo 'none supported (manual)')"
+  fi
 
   if getent hosts "$(hostname 2>/dev/null)" >/dev/null 2>&1; then
     ok "hostname resolves ($(hostname))"
@@ -491,7 +610,10 @@ report_state() {
   elif node_ok; then ok "node $v (login shell)"
   else bad "node $v — below the $NODE_MAJOR floor"; fi
 
-  local py; if py="$(find_python)"; then ok "python: $py ($($py -V 2>&1))"; else warn "no python >= $PYTHON_MIN (pm-kit's Asana MCP needs one)"; fi
+  local py
+  if py="$(venv_python)"; then ok "python: $py ($($py -V 2>&1), venv ok)"
+  elif py="$(find_python)"; then warn "python: $py ($($py -V 2>&1)) cannot create a venv — /pm-setup will fail"
+  else warn "no python >= $PYTHON_MIN (pm-kit's Asana MCP needs one)"; fi
 
   if native_claude >/dev/null; then ok "claude ($(claude_version))"
   elif local win; win="$(windows_claude)"; then
@@ -543,27 +665,31 @@ phase_prereqs() {
   check_interop
 
   if [ "$PLATFORM" = "wsl" ] || [ "$PLATFORM" = "linux" ]; then
-    if [ "$PLATFORM" = "wsl" ]; then
-      local rel; rel="$(ubuntu_release)"
-      if [ -n "$rel" ] && [ "$rel" != "24.04" ]; then
-        bad "Ubuntu $rel — the supported WSL distro is 24.04"
-        say "apt sources, python version and package names all differ between releases,"
-        say "and the mismatches do not error; they resurface later as unrelated failures."
-        say "From Windows PowerShell:  wsl --install Ubuntu-24.04"
-        note_fail "unsupported WSL distro (Ubuntu $rel)"
-        return 1
+    say "distro: $(distro_label)"
+    local pm need
+    if pm="$(pkg_manager)"; then
+      need="$(base_packages "$pm")"
+      if [ -n "$need" ]; then
+        # shellcheck disable=SC2086  # word-splitting the package list is intended
+        pkg_install $need || warn "$pm could not install: $need"
       fi
-    fi
-    if have apt-get; then
-      sudo apt-get update -qq 2>/dev/null </dev/null
-      if sudo apt-get install -y -qq git curl python3-venv >/dev/null 2>&1 </dev/null; then
-        ok "base packages (git, curl, python3-venv)"
-      else
-        bad "could not install base packages"; note_fail "base packages"
+      # wslview is the preferred browser handoff, but only a preference: wslu is
+      # no longer maintained upstream and is gone from Ubuntu 26.04 and Fedora 43,
+      # and open-url.sh falls back to PowerShell's Start-Process — which is all
+      # wslview does anyway. So its absence is a note, not a warning.
+      # Arch has it only in the AUR, which this script does not touch.
+      if [ "$PLATFORM" = "wsl" ] && ! have wslview && [ "$pm" != "pacman" ]; then
+        pkg_install wslu && ok "wslu (browser handoff)" \
+          || say "wslu not packaged here — links open via PowerShell instead (fine)"
       fi
-      # wslview lets OAuth open a real browser instead of File Explorer. Optional.
-      [ "$PLATFORM" = "wsl" ] && { sudo apt-get install -y -qq wslu >/dev/null 2>&1 </dev/null && ok "wslu (browser handoff)" || warn "wslu unavailable — links may not open"; }
+    else
+      need="$(base_packages none)"
+      warn "no apt-get, dnf or pacman — install these with your package manager, then re-run:"
+      say "git, curl, python >= $PYTHON_MIN with venv${need:+   (missing now: $need)}"
     fi
+    # The outcome, not the install exit code: this is what catches a distro whose
+    # packages installed "successfully" and still left something unusable.
+    verify_base
   elif [ "$PLATFORM" = "macos" ]; then
     have git || { warn "git missing — run: xcode-select --install"; note_fail "git (xcode-select --install)"; }
     if have brew; then
@@ -735,17 +861,29 @@ phase_github() {
   if ! have gh; then
     if [ "$PLATFORM" = "macos" ] && have brew; then
       brew install gh >/dev/null 2>&1 </dev/null && ok "gh" || { bad "could not install gh"; note_fail "gh"; return 1; }
+    elif [ "$(pkg_manager)" = "dnf" ]; then
+      # GitHub's own rpm repo, as with apt below. Written as a .repo file rather
+      # than via `dnf config-manager`, whose syntax changed incompatibly in dnf5
+      # (Fedora 41+) — a file in yum.repos.d reads the same to dnf4 and dnf5, and
+      # is what makes this work on RHEL/Rocky/Alma, which do not package gh.
+      curl -fsSL https://cli.github.com/packages/rpm/gh-cli.repo 2>/dev/null \
+        | sudo tee /etc/yum.repos.d/gh-cli.repo >/dev/null 2>&1
+      pkg_install gh && ok "gh" || { bad "could not install gh"; note_fail "gh"; return 1; }
+    elif [ "$(pkg_manager)" = "pacman" ]; then
+      # In Arch's own extra repo, and current — no third-party source needed.
+      pkg_install github-cli && ok "gh" || { bad "could not install gh"; note_fail "gh"; return 1; }
     elif have apt-get; then
-      # GitHub's own apt repo — Ubuntu's copy lags well behind.
+      # GitHub's own apt repo — Ubuntu's copy lags well behind. The source line is
+      # distro-agnostic ("stable main"), so this is right on Debian and every Ubuntu.
       sudo mkdir -p -m 755 /etc/apt/keyrings 2>/dev/null
       if curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg 2>/dev/null \
            | sudo tee /etc/apt/keyrings/githubcli-archive-keyring.gpg >/dev/null 2>&1; then
         sudo chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg
         echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
           | sudo tee /etc/apt/sources.list.d/github-cli.list >/dev/null
-        sudo apt-get update -qq 2>/dev/null </dev/null
+        pkg_refresh
       fi
-      sudo apt-get install -y -qq gh >/dev/null 2>&1 </dev/null && ok "gh" || { bad "could not install gh"; note_fail "gh"; return 1; }
+      pkg_install gh && ok "gh" || { bad "could not install gh"; note_fail "gh"; return 1; }
     else
       bad "no package manager to install gh with"; note_fail "gh"; return 1
     fi
@@ -853,13 +991,14 @@ phase_plugins() {
     *" audit-kit "*)
       # Two of the five scanners — semgrep and pip-audit — are Python CLIs, and
       # install-scanners.sh needs pipx or Homebrew to place them. A fresh Ubuntu
-      # has neither, and since 24.04 is PEP 668 "externally managed" the
-      # `pip3 --user` fallback is blocked too, so both fail with "no installer
-      # for <tool>" while the three binary scanners succeed. Provide pipx here
+      # or Fedora has neither, and both mark their Python PEP 668 "externally
+      # managed", which blocks the `pip3 --user` fallback too — so both fail with
+      # "no installer for <tool>" while the three binary scanners succeed. Provide pipx here
       # rather than let two of five silently drop.
       if ! have pipx && ! have brew; then
-        if have apt-get; then
-          if sudo apt-get install -y -qq pipx >/dev/null 2>&1 </dev/null; then
+        if pkg_manager >/dev/null; then
+          local pipx_pkg=pipx; [ "$(pkg_manager)" = "pacman" ] && pipx_pkg=python-pipx
+          if pkg_install "$pipx_pkg"; then
             ok "pipx (for the Python scanners)"
             pipx ensurepath >/dev/null 2>&1 </dev/null || true
             # ensurepath only edits the rc file; this shell still needs it, or
