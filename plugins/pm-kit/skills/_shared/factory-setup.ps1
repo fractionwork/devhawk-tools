@@ -35,25 +35,22 @@
 #      this is a .ps1 file being executed.
 # ---------------------------------------------------------------------------
 #
-# Usage:
-#   irm https://raw.githubusercontent.com/fractionwork/pm-skills/main/plugins/pm-kit/skills/_shared/factory-setup.ps1 | iex
+# Usage - sets up pm-kit and ship-kit from the public devhawk-tools marketplace:
+#   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/fractionwork/devhawk-tools/main/plugins/pm-kit/skills/_shared/factory-setup.ps1)))
 #
-#   # with arguments, which `iex` cannot pass:
-#   & ([scriptblock]::Create((irm <url>))) -Role engineer -Yes
+#   .\factory-setup.ps1 -Check   # report state, change nothing
+#   .\factory-setup.ps1 -Yes     # no questions; optional sign-ins skipped
 #
-#   # or, since iex cannot take arguments, environment variables:
-#   $env:FACTORY_SETUP_ROLE = 'pm'; irm <url> | iex
-#
-#   .\factory-setup.ps1 -Check              # report state, change nothing
-#   .\factory-setup.ps1 -Role engineer -Yes # non-interactive
-#
-# Roles: pm, engineer, devhawk, auditor, all
-# Environment: FACTORY_SETUP_ROLE, FACTORY_SETUP_YES=1, FACTORY_SETUP_CHECK=1
+# Environment (for `irm | iex`, which cannot pass arguments):
+#   FACTORY_SETUP_YES=1, FACTORY_SETUP_CHECK=1
 
 $script:NODE_MAJOR = 24
-$script:PRIVATE_MARKETPLACE = 'fractionwork/software-factory-tools'
-$script:MARKETPLACE_NAME = 'software-factory-tools'
-$script:ROLES = @('pm', 'engineer', 'devhawk', 'auditor', 'all')
+$script:PUBLIC_MARKETPLACE = 'fractionwork/devhawk-tools'
+$script:MARKETPLACE = $script:PUBLIC_MARKETPLACE
+$script:MARKETPLACE_NAME = 'devhawk-tools'
+# This copy sets up the public plugins only. `-Role local` is accepted (the
+# setup guides pass it); any other role is refused.
+$script:ROLES = @('local')
 
 # ---- arguments --------------------------------------------------------------
 
@@ -143,13 +140,18 @@ two: a Windows engineer and a WSL engineer must get the same factory.
 function Get-KitsForRole {
   param([Parameter(Mandatory)][string]$Name)
   switch ($Name) {
-    'pm'       { @('pm-kit', 'factory-kit') }
-    'engineer' { @('pm-kit', 'ship-kit', 'factory-kit') }
-    'devhawk'  { @('pm-kit', 'ship-kit', 'devhawk-kit', 'factory-kit') }
-    'auditor'  { @('audit-kit') }
-    'all'      { @('pm-kit', 'ship-kit', 'devhawk-kit', 'audit-kit', 'factory-kit') }
+    'local'    { @('pm-kit', 'ship-kit') }
     default    { @() }
   }
+}
+
+<#
+Mirrors needs_private_marketplace() in factory-setup.sh: staff roles use the
+private marketplace, and only `local` - somebody outside Fraction - the public one.
+#>
+function Test-PublicRole {
+  param([string]$Name)
+  $Name -eq 'local'
 }
 
 <#
@@ -159,11 +161,7 @@ How each kit fares on native Windows, and why. Data rather than prose, so the
 function Get-KitWindowsStatus {
   param([Parameter(Mandatory)][string]$Kit)
   switch ($Kit) {
-    'factory-kit' { @{ State = 'ok';       Note = '' } }
-    'devhawk-kit' { @{ State = 'ok';       Note = '' } }
-    'pykit'       { @{ State = 'ok';       Note = '' } }
     'ship-kit'    { @{ State = 'ok';       Note = '' } }
-    'audit-kit'   { @{ State = 'degraded'; Note = 'semgrep has no native Windows build upstream - the other four scanners install' } }
     'pm-kit'      { @{ State = 'ok';       Note = '' } }
     default       { @{ State = 'ok';       Note = '' } }
   }
@@ -344,25 +342,7 @@ function Get-ClaudeVersion {
 
 function Request-Role {
   if ($script:Opts.Role) { return $script:Opts.Role }
-  if ($script:Opts.Yes)  { return 'engineer' }
-
-  Write-Host ''
-  Write-Host '  Which kits do you want?' -ForegroundColor White
-  Write-Host ''
-  Write-Say '1  PM / delivery      pm-kit factory-kit           boards, no repository cloned'
-  Write-Say '2  Engineer           + ship-kit                   writing code            (default)'
-  Write-Say '3  DevHawk engineer   + devhawk-kit                onboarding + the stack'
-  Write-Say '4  Auditor            audit-kit                    auditing a codebase'
-  Write-Say '5  Everything'
-  Write-Host ''
-  $a = (Read-Host '       Choose 1-5 [2]').Trim()
-  switch ($a) {
-    '1'     { 'pm' }
-    '3'     { 'devhawk' }
-    '4'     { 'auditor' }
-    '5'     { 'all' }
-    default { 'engineer' }
-  }
+  return 'local'
 }
 
 # ---- phase 1: prerequisites -------------------------------------------------
@@ -458,41 +438,32 @@ function Invoke-PhasePrereqs {
 function Invoke-PhaseGitHub {
   Write-Step '2/5  GitHub'
 
-  if (-not (Test-Have 'gh')) {
-    Write-Bad 'gh is not installed - skipping'
-    Add-Failure 'GitHub auth (no gh)'
+  if ($script:MARKETPLACE -eq $script:PUBLIC_MARKETPLACE) {
+    # The PUBLIC marketplace needs no account to install from. ship-kit's
+    # pull-request skills still drive GitHub through gh, so OFFER a sign-in -
+    # skipping it leaves the plugins working, minus those skills.
+    Write-Ok 'the plugins themselves need no GitHub account'
+    Write-Say "ship-kit's pull-request skills (/create-pr, /pr-review, /pr-watch) use the"
+    Write-Say 'GitHub CLI - signing in is optional'
+    if (-not (Test-Have 'gh')) { Write-Warn 'gh is not installed - sign in later with: gh auth login'; return }
+    & gh auth status 2>&1 | Out-Null
+    if ($LASTEXITCODE -eq 0) { Write-Ok 'authenticated to GitHub'; return }
+    if ($script:Opts.Yes -or -not (Confirm-Step 'sign in to GitHub now? (needed only for the pull-request skills)' 'yes')) {
+      Write-Say 'skipped - sign in any time later with: gh auth login'
+      return
+    }
+    & gh auth login --git-protocol https --web
+    & gh auth status 2>&1 | Out-Null
+    if ($LASTEXITCODE -eq 0) {
+      Write-Ok 'authenticated to GitHub'
+      & gh auth setup-git 2>&1 | Out-Null
+    } else {
+      Write-Warn 'not signed in - run later: gh auth login'
+    }
+    $global:LASTEXITCODE = 0
     return
   }
 
-  & gh auth status 2>&1 | Out-Null
-  if ($LASTEXITCODE -ne 0) {
-    if ($script:Opts.Yes) {
-      Write-Bad 'not authenticated, and -Yes cannot complete a browser login'
-      Write-Say 'run: gh auth login'
-      Add-Failure 'GitHub auth (run: gh auth login)'
-      return
-    }
-    Write-Say 'The marketplace repo is PRIVATE, so this is not optional.'
-    Write-Say 'Choose HTTPS when asked.'
-    & gh auth login
-    & gh auth status 2>&1 | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-      Write-Bad 'still not authenticated'
-      Add-Failure 'GitHub auth (run: gh auth login)'
-      return
-    }
-  }
-  Write-Ok 'authenticated to GitHub'
-
-  # The marketplace is a git clone, and for a PRIVATE repo over HTTPS git needs
-  # credentials of its own - a gh login alone does not give git any. setup-git
-  # makes gh the credential helper, and is safe to repeat.
-  & gh auth setup-git 2>&1 | Out-Null
-  if ($LASTEXITCODE -eq 0) { Write-Ok 'git uses gh for GitHub credentials' }
-  else {
-    Write-Warn 'could not configure git to use gh - a private clone may be refused'
-    Add-Failure 'git credentials (run: gh auth setup-git)'
-  }
 }
 
 # ---- phase 3: marketplace ---------------------------------------------------
@@ -508,18 +479,16 @@ function Invoke-PhaseMarketplace {
 
   $existing = & claude plugin marketplace list 2>&1 | Out-String
   if ($existing -match [regex]::Escape($script:MARKETPLACE_NAME)) {
-    Write-Ok "marketplace already added: $($script:PRIVATE_MARKETPLACE)"
+    Write-Ok "marketplace already added: $($script:MARKETPLACE)"
     return
   }
 
-  & claude plugin marketplace add $script:PRIVATE_MARKETPLACE 2>&1 | Out-Null
+  & claude plugin marketplace add $script:MARKETPLACE 2>&1 | Out-Null
   if ($LASTEXITCODE -eq 0) {
-    Write-Ok "added marketplace: $($script:PRIVATE_MARKETPLACE)"
+    Write-Ok "added marketplace: $($script:MARKETPLACE)"
   } else {
-    Write-Bad "could not add marketplace: $($script:PRIVATE_MARKETPLACE)"
-    Write-Say 'this repo is private - a not-found here is usually a permissions problem,'
-    Write-Say "not a typo. Confirm with: gh repo view $($script:PRIVATE_MARKETPLACE)"
-    Add-Failure "marketplace $($script:PRIVATE_MARKETPLACE)"
+    Write-Bad "could not add marketplace: $($script:MARKETPLACE)"
+    Add-Failure "marketplace $($script:MARKETPLACE)"
   }
 }
 
@@ -550,46 +519,9 @@ function Invoke-PhasePlugins {
 
   if ($Kits -contains 'pm-kit') {
     Write-Host ''
-    Write-Say 'pm-kit: run /pm-setup inside Claude Code to connect your own Asana account,'
-    Write-Say 'or /factory-connect to manage boards through the factory instead.'
+    Write-Say 'pm-kit: run /pm-setup inside Claude Code to connect your own Asana account.'
   }
 
-  if ($Kits -contains 'devhawk-kit') {
-    # Its skills are .mjs, but /do-deploy drives DigitalOcean from Git Bash and
-    # reads doctl's JSON with jq. Neither ships with Git for Windows, and the
-    # failure is a shell one-liner printing nothing rather than a missing tool.
-    Write-Host ''
-    if (Confirm-Step 'install the DigitalOcean deploy tools (doctl, jq)?' 'no') {
-      Install-WingetPackage -Id 'DigitalOcean.Doctl' -Label 'doctl' -ProbeCommand 'doctl' | Out-Null
-      Install-WingetPackage -Id 'jqlang.jq'          -Label 'jq'    -ProbeCommand 'jq'    | Out-Null
-      # psql deliberately not installed here: winget only offers it inside the
-      # full PostgreSQL server package, whose installer is interactive. Anyone
-      # running migrations by hand installs the client themselves.
-      if (-not (Test-Have 'psql')) { Write-Say 'psql is not installed - /db-migrate needs it; the PostgreSQL client install provides it' }
-    } else {
-      Write-Say 'skipped - everything except /do-deploy works without them'
-    }
-  }
-
-  if ($Kits -contains 'audit-kit') {
-    Write-Host ''
-    if (Confirm-Step "install audit-kit's scanners (semgrep, gitleaks, trivy, osv-scanner, pip-audit)?") {
-      $installer = Get-ChildItem -Path (Join-Path $env:USERPROFILE '.claude\plugins') -Recurse -Filter 'install-scanners.ps1' -ErrorAction SilentlyContinue |
-        Where-Object { $_.FullName -match 'audit-kit' } | Select-Object -First 1
-      if ($installer) {
-        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer.FullName -Yes
-        if ($LASTEXITCODE -eq 0) { Write-Ok 'scanners' }
-        else { Write-Warn 'some scanners did not install'; Add-Failure "audit scanners (re-run: $($installer.FullName))" }
-      } else {
-        # An audit-kit that predates its Windows installer: do the two winget has.
-        Install-WingetPackage -Id 'AquaSecurity.Trivy' -Label 'trivy'    -ProbeCommand 'trivy'    | Out-Null
-        Install-WingetPackage -Id 'Gitleaks.Gitleaks'  -Label 'gitleaks' -ProbeCommand 'gitleaks' | Out-Null
-        Write-Say 'semgrep, osv-scanner and pip-audit need a newer audit-kit; update the marketplace.'
-      }
-    } else {
-      Write-Say 'skipped - audit-kit still works, it degrades to LLM-only analysis and says so'
-    }
-  }
 }
 
 # ---- phase 5: credentials ---------------------------------------------------
@@ -599,40 +531,32 @@ function Invoke-PhaseCredentials {
   Write-Step '5/5  Credentials - all optional'
   Write-Say 'Everything below can be skipped. The kits are usable without any of it.'
   Write-Host ''
-  Write-Say 'To manage a board THROUGH THE FACTORY - Asana, Linear or Azure DevOps,'
-  Write-Say 'with no board credential stored here - run /factory-connect.'
-  Write-Say 'It needs only the token asked for below.'
-  Write-Say ''
-  Write-Say 'The factory engine is a separate service. If you do not use one, skip this.'
-
-  $default = if ($Kits -contains 'pm-kit' -and $Kits.Count -le 2) { 'yes' } else { 'no' }
-  $prompt = 'connect this machine to a factory engine?'
-  if (Get-ClaudeSettingsEnv -Name 'FACTORY_API_TOKEN') {
-    Write-Ok 'FACTORY_API_TOKEN already in settings.json - keeping it'
-    $prompt = 'replace the stored FACTORY_API_TOKEN?'
-    $default = 'no'
-  }
-
-  Write-Host ''
-  if (-not (Confirm-Step $prompt $default)) { Write-Say 'skipped - nothing here depends on it'; return }
-
-  $t = Read-Secret 'FACTORY_API_TOKEN'
-  if (-not $t) {
-    # Empty input NEVER overwrites a credential somebody already has.
-    Write-Warn 'nothing entered - existing value left untouched'
+  if ($script:MARKETPLACE -eq $script:PUBLIC_MARKETPLACE) {
+    # Outside Fraction there is no engine to connect to, and the public kits do
+    # not know one exists - so neither does this. pm-kit signs in to Asana with a
+    # personal access token, kept in settings.json `env`: Claude Code hands that
+    # to every session and to the Asana server it starts.
+    Write-Say 'pm-kit connects to Asana with a personal access token. To make one:'
+    Write-Say '  open https://app.asana.com/0/my-apps -> "Create new token" -> copy it'
+    if (Get-ClaudeSettingsEnv -Name 'ASANA_PAT') {
+      Write-Ok 'an Asana token is already saved in settings.json - keeping it'
+      return
+    }
+    if ($script:Opts.Yes -or -not (Confirm-Step 'paste your Asana token now?' 'yes')) {
+      Write-Say 'skipped - run /pm-setup inside Claude Code whenever you are ready'
+      return
+    }
+    $t = Read-Secret 'Asana token'
+    if (-not $t) { Write-Say 'nothing entered - skipped. /pm-setup can do this later.'; return }
+    try {
+      $p = Set-ClaudeSettingsEnv -Name 'ASANA_PAT' -Value $t
+      Write-Ok "saved to $p"
+      Write-Say 'restart Claude Code, then run /pm-setup once to finish'
+    } catch {
+      Write-Bad "could not write settings.json: $($_.Exception.Message)"
+      Add-Failure 'Asana token (add it to ~/.claude/settings.json under env - see the setup guide)'
+    }
     return
-  }
-
-  try {
-    # settings.json, not ~/.devhawk/env: that file is sourced by a login shell
-    # and nothing on Windows reads it.
-    $p = Set-ClaudeSettingsEnv -Name 'FACTORY_API_TOKEN' -Value $t
-    Write-Ok "saved to $p"
-    Write-Warn 'RESTART Claude Code before this takes effect'
-    Write-Say 'MCP servers are resolved at startup, so a running session changes nothing.'
-  } catch {
-    Write-Bad "could not write settings.json: $($_.Exception.Message)"
-    Add-Failure 'FACTORY_API_TOKEN (add it to ~/.claude/settings.json under env)'
   }
 }
 
@@ -676,14 +600,14 @@ function Show-State {
     if ($LASTEXITCODE -eq 0) { Write-Ok 'GitHub authenticated' } else { Write-Bad 'GitHub not authenticated' }
   }
 
-  if (Get-ClaudeSettingsEnv -Name 'FACTORY_API_TOKEN') { Write-Ok 'FACTORY_API_TOKEN set' }
-  else { Write-Warn 'FACTORY_API_TOKEN not set (optional)' }
+  if (Get-ClaudeSettingsEnv -Name 'ASANA_PAT') { Write-Ok 'Asana token saved in settings.json' }
+  else { Write-Say 'no Asana token saved yet (fine - /pm-setup can do it)' }
 
   if (Test-Have 'claude') {
     Write-Host ''
     Write-Host '  Plugins' -ForegroundColor White
     $list = & claude plugin list 2>&1 | Out-String
-    foreach ($k in @('pm-kit', 'ship-kit', 'devhawk-kit', 'audit-kit', 'factory-kit', 'pykit')) {
+    foreach ($k in @('pm-kit', 'ship-kit')) {
       if ($list -match [regex]::Escape($k)) {
         $s = Get-KitWindowsStatus $k
         if ($s.State -eq 'ok') { Write-Ok $k } else { Write-Warn "$k - $($s.Note)" }
@@ -750,6 +674,10 @@ function Invoke-FactorySetup {
 
   $chosen = Request-Role
   $kits = Get-KitsForRole $chosen
+  if (Test-PublicRole $chosen) {
+    $script:MARKETPLACE = $script:PUBLIC_MARKETPLACE
+    $script:MARKETPLACE_NAME = 'devhawk-tools'
+  }
   Write-Say "role: $chosen  ->  $($kits -join ' ')"
 
   Invoke-PhasePrereqs -Kits $kits

@@ -53,8 +53,9 @@ Board-view projects use these columns in order:
 | READY FOR TESTING | Code merged, needs QA |
 | READY FOR RELEASE | Tested, awaiting deploy |
 | DONE | Shipped |
+| PARKED | Captured but not vetted: requests nobody has committed to, kept so nothing a client asked for is lost. Moved here by board triage after a person approves; move a card back to INBOX or BACKLOG to revive it. |
 
-Not all projects need all sections. At minimum: INBOX, BACKLOG, TODO, WIP, REVIEW, DONE.
+Not all projects need all sections. At minimum: INBOX, BACKLOG, TODO, WIP, REVIEW, DONE, and PARKED on any board the factory or board triage cleans up.
 
 **A draft PR keeps its card in WIP.** The distinction that matters is *who is
 blocked* — a draft waits on the author, a ready PR waits on a reviewer. Parking

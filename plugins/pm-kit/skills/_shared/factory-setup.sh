@@ -1,36 +1,16 @@
 #!/usr/bin/env bash
-# factory-setup — one command from a bare machine to working Claude Code plugins.
+# devhawk-tools setup — one command from a bare machine to working Claude Code
+# plugins: pm-kit and ship-kit, from the public devhawk-tools marketplace.
 #
-# Installs prerequisites, authenticates to GitHub, adds the marketplace, installs
-# the kits you pick (plus audit-kit's scanners), and optionally records the
-# credentials that have a LOCAL consumer.
-#
-# WHAT THIS DELIBERATELY DOES NOT DO. An 817-line installer used to live here and
-# was deleted on purpose: copying skills, registering MCP servers and splicing
-# prose into ~/.claude/CLAUDE.md are the plugin system's job now, and doing them
-# by hand is how installed copies drift from the repo. This script's remit is
-# strictly what has to happen BEFORE or OUTSIDE Claude Code. If a plugin can do
-# it, this must not.
-#
-# THE ENGINE IS OPTIONAL. Of 34 skills across the four kits, four consult the
-# factory and each does so as an extra step at the END, never a precondition. A
-# machine that never sets FACTORY_API_TOKEN gets a complete, working install —
-# the token prompt is skippable and says so. Do not read "factory" in the name as
-# a requirement; it is the name of the toolkit, not a dependency.
-#
-# Server-side credentials (Linear, Azure DevOps, Fireflies, Teams, Slack) are NOT
-# collected here. Nothing on a workstation reads them — they live in
-# /etc/factory/env on the engine host and are an operator's job. Writing them
-# locally would create files that look like configuration and are loaded by
-# nothing, which is worse than their absence.
+# Installs the prerequisites (git, Node, Python, the GitHub CLI, Claude Code),
+# adds the marketplace, installs both plugins and builds pm-kit's Python
+# runtime, then offers two optional sign-ins: GitHub (for ship-kit's
+# pull-request skills) and an Asana personal access token (for pm-kit).
 #
 # Usage:
-#   ./factory-setup.sh                    # interactive
-#   ./factory-setup.sh --check            # report state, change nothing
-#   ./factory-setup.sh --role engineer --yes   # non-interactive
-#   ./factory-setup.sh --role pm          # board management: pm-kit + factory-kit
-#
-# Roles: pm · engineer · devhawk · auditor · all
+#   bash factory-setup.sh             # set everything up
+#   bash factory-setup.sh --check     # report what is installed, change nothing
+#   bash factory-setup.sh --yes       # no questions; optional sign-ins skipped
 #
 # Safe to re-run: every phase is idempotent, and a phase that fails does not stop
 # the ones after it — failures are collected and printed once at the end.
@@ -42,8 +22,7 @@ set -uo pipefail
 NVM_VERSION="v0.40.6"
 NODE_MAJOR="24"
 PYTHON_MIN="3.10"
-PRIVATE_MARKETPLACE="fractionwork/software-factory-tools"
-PUBLIC_MARKETPLACE="fractionwork/pm-skills"
+PUBLIC_MARKETPLACE="fractionwork/devhawk-tools"
 DEVHAWK_HOME="${DEVHAWK_HOME:-$HOME/.devhawk}"
 ENV_FILE="$DEVHAWK_HOME/env"
 
@@ -522,67 +501,18 @@ find_python() {
 }
 
 # ── role → kits ─────────────────────────────────────────────────────────────
+# This copy sets up the public plugins only. `--role local` is accepted (it is
+# what the setup guides pass); any other role is refused at startup.
 kits_for_role() {
   case "$1" in
-    pm)       echo "pm-kit factory-kit" ;;
-    engineer) echo "pm-kit ship-kit factory-kit" ;;
-    devhawk)  echo "pm-kit ship-kit devhawk-kit factory-kit" ;;
-    auditor)  echo "audit-kit" ;;
-    all)      echo "pm-kit ship-kit devhawk-kit audit-kit factory-kit" ;;
-    *)        echo "" ;;
+    local) echo "pm-kit ship-kit" ;;
+    *)     echo "" ;;
   esac
 }
 
-# EVERY ROLE HERE USES THE PRIVATE MARKETPLACE, including `pm`.
-#
-# This script is Fraction's internal installer. The people running it are staff,
-# they have GitHub accounts, and they get the same marketplace as each other —
-# a PM is not a lesser install, they just need fewer kits.
-#
-# It used to route `pm` to the PUBLIC mirror so a PM never had to run `gh auth`.
-# That was a real convenience and it is gone deliberately, because it bought
-# less than it looked: the public mirror carries pm-kit alone, whose MCP server
-# is Asana-only, so a PM on that path could not manage a Linear or Azure DevOps
-# board at all and could not reach a factory.
-#
-# Stated as a fact about WHO runs this, not as a consequence of which kits
-# happen to be private. The kit-derived version was true by accident — every
-# role's list contains something private today — and a future kit shuffle could
-# silently drop a role back onto the public mirror, where half its tools do not
-# exist.
-#
-# The public mirror still has a job, and it is a different one: somebody outside
-# Fraction installing pm-kit by hand for their own Asana board, per
-# docs/claude-plugins.md. They do not run this script.
-needs_private_marketplace() {
-  # Deliberately ignores its argument. Kept as a function, and still called,
-  # because the call sites read as a question worth asking — and because the day
-  # an external-facing role exists, this is the one place that has to change.
-  return 0
-}
+needs_private_marketplace() { return 1; }
 
-prompt_role() {
-  [ -n "$ROLE" ] && return 0
-  if [ "$ASSUME_YES" = "1" ]; then ROLE="engineer"; return 0; fi
-  cat <<'EOF'
-
-  Which kits do you want?
-
-    1) PM / delivery      pm-kit                                (no GitHub access needed)
-    2) Engineer           pm-kit ship-kit
-    3) DevHawk engineer   pm-kit ship-kit devhawk-kit
-    4) Auditor            audit-kit
-    5) Everything
-
-EOF
-  printf '  Choose [2]: '
-  local n=""; read -r n </dev/tty 2>/dev/null || n=""
-  case "${n:-2}" in
-    1) ROLE="pm" ;; 2) ROLE="engineer" ;; 3) ROLE="devhawk" ;;
-    4) ROLE="auditor" ;; 5) ROLE="all" ;;
-    *) ROLE="engineer" ;;
-  esac
-}
+prompt_role() { [ -n "$ROLE" ] || ROLE="local"; }
 
 # ── status ──────────────────────────────────────────────────────────────────
 report_state() {
@@ -622,26 +552,25 @@ report_state() {
 
   if have gh; then
     if gh auth status >/dev/null 2>&1; then ok "gh authenticated"; else warn "gh installed but not authenticated"; fi
-  else warn "gh missing (needed only for the private marketplace)"; fi
+  else warn "gh missing (ship-kit's pull-request skills need it)"; fi
 
   if have claude; then
     local m; m="$(claude plugin marketplace list 2>/dev/null)"
     case "$m" in
-      *software-factory-tools*) ok "marketplace: $PRIVATE_MARKETPLACE" ;;
-      *pm-skills*)              ok "marketplace: $PUBLIC_MARKETPLACE" ;;
-      *)                        warn "no factory marketplace configured" ;;
+      *devhawk-tools*)          ok "marketplace: $PUBLIC_MARKETPLACE" ;;
+      *pm-skills*)              warn "marketplace: fractionwork/pm-skills — renamed; remove it and re-run with --role local" ;;
+      *)                        warn "devhawk-tools marketplace not added yet" ;;
     esac
     local p; p="$(claude plugin list 2>/dev/null | tr '\n' ' ')"
-    local k; for k in pm-kit ship-kit devhawk-kit audit-kit; do
+    local k; for k in pm-kit ship-kit; do
       case " $p " in *"$k"*) ok "plugin: $k" ;; *) say "plugin: $k not installed" ;; esac
     done
   fi
 
-  if [ -r "$ENV_FILE" ]; then
-    ok "credentials file: $ENV_FILE ($(stat -c '%a' "$ENV_FILE" 2>/dev/null || stat -f '%Lp' "$ENV_FILE" 2>/dev/null))"
-    grep -oE '^export [A-Z_]+' "$ENV_FILE" 2>/dev/null | awk '{print "      " $2}'
+  if [ -n "$(claude_env_get ASANA_PAT)" ]; then
+    ok "Asana token saved in $CLAUDE_SETTINGS"
   else
-    say "no credentials recorded (fine — the kits work without them)"
+    say "no Asana token saved yet (fine — /pm-setup can do it)"
   fi
   printf '\n'
 }
@@ -851,11 +780,15 @@ adopt_path() {
 
 phase_github() {
   step "2/5  GitHub access"
-  local kits; kits="$(kits_for_role "$ROLE")"
-  if ! needs_private_marketplace "$kits"; then
-    ok "not needed — these kits come from the public marketplace"
-    say "no gh auth, no SSH key, no GitHub account required"
-    return 0
+  local kits public=0; kits="$(kits_for_role "$ROLE")"
+  needs_private_marketplace "$kits" || public=1
+  if [ "$public" = 1 ]; then
+    # The PUBLIC marketplace needs no account to install from. ship-kit's
+    # pull-request skills still drive GitHub through gh, so install it and OFFER
+    # a sign-in — skipping it leaves the plugins working, minus those skills.
+    ok "the plugins themselves need no GitHub account"
+    say "ship-kit's pull-request skills (/create-pr, /pr-review, /pr-watch) use the"
+    say "GitHub CLI, so it is installed now — signing in is optional"
   fi
 
   if ! have gh; then
@@ -893,29 +826,20 @@ phase_github() {
 
   if gh auth status >/dev/null 2>&1; then
     ok "gh authenticated"
-  else
-    say "the marketplace repo is PRIVATE, so this cannot be skipped for these kits"
-    say "choose SSH — it is the only protocol that lets the marketplace auto-update"
-    if [ "$ASSUME_YES" = "1" ]; then
-      bad "not authenticated, and --yes cannot complete a browser login"
-      say "run: gh auth login --git-protocol ssh --web"
-      note_fail "gh auth (run: gh auth login --git-protocol ssh --web)"
-      return 1
+  elif [ "$public" = 1 ]; then
+    if [ "$ASSUME_YES" != "1" ] && confirm "sign in to GitHub now? (needed only for the pull-request skills)" yes; then
+      # HTTPS, with gh as git's credential helper: nothing to set up, and the
+      # public marketplace never needs SSH.
+      gh auth login --git-protocol https --web </dev/tty
+      if gh auth status >/dev/null 2>&1; then
+        ok "gh authenticated"
+        gh auth setup-git >/dev/null 2>&1 || true
+      else
+        warn "not signed in — run later: gh auth login"
+      fi
+    else
+      say "skipped — sign in any time later with: gh auth login"
     fi
-    gh auth login --git-protocol ssh --web </dev/tty
-    gh auth status >/dev/null 2>&1 && ok "gh authenticated" || { bad "still not authenticated"; note_fail "gh auth"; return 1; }
-  fi
-
-  # Trust github.com's host key non-interactively. Without this, callers that
-  # cannot prompt — git, gh, Claude Code's marketplace fetch — fail with
-  # "host key not in known hosts" rather than asking.
-  mkdir -p "$HOME/.ssh" 2>/dev/null && chmod 700 "$HOME/.ssh" 2>/dev/null
-  if ! ssh-keygen -F github.com >/dev/null 2>&1; then
-    ssh-keyscan -t rsa,ecdsa,ed25519 github.com >> "$HOME/.ssh/known_hosts" 2>/dev/null \
-      && ok "trusted github.com's host key" \
-      || { warn "could not add github.com's host key"; note_fail "github.com host key"; }
-  else
-    ok "github.com host key already trusted"
   fi
 }
 
@@ -925,7 +849,7 @@ phase_marketplace() {
 
   local kits source
   kits="$(kits_for_role "$ROLE")"
-  if needs_private_marketplace "$kits"; then source="$PRIVATE_MARKETPLACE"; else source="$PUBLIC_MARKETPLACE"; fi
+  source="$PUBLIC_MARKETPLACE"
 
   local existing; existing="$(claude plugin marketplace list 2>/dev/null)"
   case "$existing" in
@@ -936,10 +860,6 @@ phase_marketplace() {
     ok "added marketplace: $source"
   else
     bad "could not add marketplace: $source"
-    if [ "$source" = "$PRIVATE_MARKETPLACE" ]; then
-      say "this repo is private — a not-found here is usually a permissions problem,"
-      say "not a typo. Confirm with: gh repo view $PRIVATE_MARKETPLACE"
-    fi
     note_fail "marketplace $source"
     return 1
   fi
@@ -951,7 +871,7 @@ phase_plugins() {
 
   local kits mp k installed
   kits="$(kits_for_role "$ROLE")"
-  if needs_private_marketplace "$kits"; then mp="software-factory-tools"; else mp="pm-skills"; fi
+  mp="devhawk-tools"
   installed="$(claude plugin list 2>/dev/null | tr '\n' ' ')"
 
   for k in $kits; do
@@ -984,49 +904,6 @@ phase_plugins() {
       ;;
   esac
 
-  # audit-kit's optional scanners. The installer ships INSIDE the plugin, so its
-  # path is only knowable after the install above — and the plugin cache is
-  # content-hash addressed, so it must be discovered rather than constructed.
-  case " $kits " in
-    *" audit-kit "*)
-      # Two of the five scanners — semgrep and pip-audit — are Python CLIs, and
-      # install-scanners.sh needs pipx or Homebrew to place them. A fresh Ubuntu
-      # or Fedora has neither, and both mark their Python PEP 668 "externally
-      # managed", which blocks the `pip3 --user` fallback too — so both fail with
-      # "no installer for <tool>" while the three binary scanners succeed. Provide pipx here
-      # rather than let two of five silently drop.
-      if ! have pipx && ! have brew; then
-        if pkg_manager >/dev/null; then
-          local pipx_pkg=pipx; [ "$(pkg_manager)" = "pacman" ] && pipx_pkg=python-pipx
-          if pkg_install "$pipx_pkg"; then
-            ok "pipx (for the Python scanners)"
-            pipx ensurepath >/dev/null 2>&1 </dev/null || true
-            # ensurepath only edits the rc file; this shell still needs it, or
-            # the very next `have pipx` fails on a box that just installed it.
-            adopt_path "$HOME/.local/bin"
-          else
-            warn "could not install pipx — semgrep and pip-audit will be skipped"
-          fi
-        fi
-      fi
-      # The binary scanners install into ~/.local/bin. Ubuntu's ~/.profile adds
-      # that to PATH only if it EXISTS at login, and it may have just been
-      # created — so a new shell would still not find trivy or osv-scanner.
-      mkdir -p "$HOME/.local/bin" 2>/dev/null
-      adopt_path "$HOME/.local/bin"
-
-      local s; s="$(find "$HOME/.claude/plugins" -path '*audit-kit*' -name 'install-scanners.sh' -type f 2>/dev/null | head -1)"
-      if [ -n "$s" ]; then
-        if [ "$ASSUME_YES" = "1" ] || confirm "install audit-kit's scanners (semgrep, gitleaks, trivy, osv-scanner, pip-audit)?"; then
-          bash "$s" --yes && ok "scanners" || { warn "some scanners did not install"; note_fail "audit scanners (re-run: $s)"; }
-        else
-          say "skipped — audit-kit still works, it degrades to LLM-only analysis and says so"
-        fi
-      else
-        warn "scanner installer not found — run /audit-install-scanners inside Claude Code"
-      fi
-      ;;
-  esac
 }
 
 # The rc file the user's OWN shell will actually read on a new session.
@@ -1066,6 +943,85 @@ rc_ensure() {
 # Is this variable already stored?
 secret_set() { grep -q "^export $1=" "$ENV_FILE" 2>/dev/null; }
 
+# Claude Code's own settings file. Its "env" block is handed to every session AND
+# every MCP server Claude Code starts, on every platform — so it is where a token
+# reaches pm-kit's Asana server whatever shell the user starts Claude Code from.
+# An `export` in a shell rc only reaches sessions started from that shell.
+CLAUDE_SETTINGS="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json"
+
+claude_env_get() {  # <name> → value, or nothing
+  have python3 || return 0
+  python3 - "$CLAUDE_SETTINGS" "$1" <<'PY' 2>/dev/null
+import json, sys
+try:
+    print(json.load(open(sys.argv[1], encoding="utf-8")).get("env", {}).get(sys.argv[2], ""))
+except Exception:
+    pass
+PY
+}
+
+claude_env_set() {  # <name> <value> — merges; never rewrites a file it cannot parse
+  have python3 || { bad "python3 is needed to update $CLAUDE_SETTINGS"; return 1; }
+  NAME="$1" VALUE="$2" python3 - "$CLAUDE_SETTINGS" <<'PY'
+import json, os, sys
+path = sys.argv[1]
+settings = {}
+if os.path.exists(path):
+    raw = open(path, encoding="utf-8").read()
+    if raw.strip():
+        try:
+            settings = json.loads(raw)
+        except ValueError:
+            sys.exit("settings.json is not valid JSON, so it was left unchanged: " + path)
+        if not isinstance(settings, dict):
+            sys.exit("settings.json is not a JSON object, so it was left unchanged: " + path)
+    # The original, once: a re-run must not replace the file the user had before
+    # this script ever touched it. Created 0600 from the start — it can hold
+    # every token in settings.json, so it is never world-readable, even briefly.
+    backup = path + ".bak"
+    if not os.path.exists(backup):
+        fd = os.open(backup, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(raw)
+os.makedirs(os.path.dirname(path), exist_ok=True)
+settings.setdefault("env", {})[os.environ["NAME"]] = os.environ["VALUE"]
+fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+with os.fdopen(fd, "w", encoding="utf-8") as f:
+    json.dump(settings, f, indent=2)
+    f.write("\n")
+# O_CREAT's mode applies only to a NEW file; an existing one keeps its own.
+os.chmod(path, 0o600)
+PY
+}
+
+# Outside Fraction, pm-kit signs in to Asana with a personal access token: no
+# OAuth app to register, nothing to configure. Offered here so the one command
+# leaves a working setup; skippable, and /pm-setup covers it later.
+offer_asana_token() {
+  printf '\n'
+  say "pm-kit connects to Asana with a personal access token. To make one:"
+  say "  open https://app.asana.com/0/my-apps → \"Create new token\" → copy it"
+  if [ -n "$(claude_env_get ASANA_PAT)" ]; then
+    ok "an Asana token is already saved in $CLAUDE_SETTINGS — keeping it"
+    return 0
+  fi
+  if [ "$ASSUME_YES" = "1" ] || ! confirm "paste your Asana token now?" yes; then
+    say "skipped — run /pm-setup inside Claude Code whenever you are ready"
+    return 0
+  fi
+  local t; t="$(read_secret 'Asana token (hidden as you paste)')"
+  if [ -z "$t" ]; then
+    say "nothing entered — skipped. /pm-setup can do this later."
+    return 0
+  fi
+  if claude_env_set ASANA_PAT "$t"; then
+    ok "saved to $CLAUDE_SETTINGS (only you can read it)"
+    say "restart Claude Code, then run /pm-setup once to finish"
+  else
+    note_fail "Asana token (add it to $CLAUDE_SETTINGS — see the setup guide)"
+  fi
+}
+
 save_secret() {
   local name="$1" value="$2" tmp
   mkdir -p "$DEVHAWK_HOME" 2>/dev/null
@@ -1096,88 +1052,10 @@ phase_credentials() {
   step "5/5  Credentials — all optional"
   say "Everything below can be skipped. The kits are fully usable without any of it."
 
-  # --- Board, channel and transcript credentials are NOT collected here.
-  #
-  # Not because they do not matter, but because this script is the wrong place
-  # to ask. It runs once per MACHINE; those credentials belong to a PROJECT. At
-  # install time nobody knows which project this machine will work on, one
-  # machine often serves several with different boards, and the values are read
-  # by the ENGINE rather than by anything here — so a copy made now is a copy
-  # somebody has to move by hand later.
-  #
-  # `onboard` asks instead, and asks better: it already knows the project's
-  # `pm.tool`, so it requests exactly the one board credential that project uses
-  # and then PROVES it by listing board fields. Asking here meant offering a
-  # Linear shop an Asana prompt and an ADO prompt it would never use.
   printf '\n'
-  # Two different destinations, and conflating them told a pm-kit-only user to
-  # wait for a prompt that was never coming: `onboard` ships in devhawk-kit, so
-  # a PM who installed pm-kit alone will never run it. Lead with the one that
-  # applies to everybody.
-  # TWO paths, and saying only one of them is how a Linear or ADO user was told
-  # to go and authenticate against Asana. `/pm-setup` is the Asana-DIRECT path;
-  # the factory path covers all three boards and needs nothing on this machine
-  # but the token collected below.
   say "To drive an Asana board with YOUR OWN Asana account, run \`/pm-setup\`."
   say "The runtime is already installed above; that signs it in."
-  say ""
-  say "To manage a board THROUGH THE FACTORY — Asana, Linear or Azure DevOps, with"
-  say "no repository cloned and no board credential stored here — run"
-  say "\`/factory-connect\` instead. It needs only the token asked for below."
-  case " $(kits_for_role "$ROLE") " in
-    *" devhawk-kit "*)
-      say ""
-      say "Credentials the ENGINE reads — Linear, Azure DevOps, Fireflies, Slack —"
-      say "are not asked for here either. They belong to a project rather than to"
-      say "this machine, and \`onboard\` collects them: it knows which board the"
-      say "project actually uses and proves each one by using it."
-      ;;
-  esac
-
-  # --- The factory engine. OPTIONAL, and the wording matters: people read the
-  # --- script's name and assume the engine is required. It is not.
-  printf '\n'
-  say "The factory engine is a separate service. If you do not use one, skip this —"
-  say "every kit works without it, and no skill will mention it."
-  # …EXCEPT that for a PM the factory is now the only way to reach a Linear or
-  # ADO board from here, so "optional" is misleading advice to give them. The
-  # default flips per role rather than the wording pretending both are the same.
-  local factory_default=no
-  if [ "$ROLE" = "pm" ]; then
-    factory_default=yes
-    say ""
-    say "You chose the PM kits, so this is worth saying plainly: the factory is how"
-    say "you manage a Linear or Azure DevOps board from this machine. Without a"
-    say "token, board work here is Asana-only and uses your own Asana account."
-  fi
-  # A re-run must never look like it might take something away. If a token is
-  # already stored, say so FIRST and make replacing it the explicit choice —
-  # the default returns to "no" even for a PM, so pressing Enter keeps what is
-  # there. The role-based default is about ASKING somebody who has nothing; it
-  # must never become a default answer of "yes, destroy the one you have".
-  local prompt="connect this machine to a factory engine?"
-  if secret_set FACTORY_API_TOKEN; then
-    ok "FACTORY_API_TOKEN already stored in $ENV_FILE — keeping it"
-    prompt="replace the stored FACTORY_API_TOKEN?"
-    factory_default=no
-  fi
-
-  if confirm "$prompt" "$factory_default"; then
-    t="$(read_secret 'FACTORY_API_TOKEN')"
-    if [ -n "$t" ]; then
-      save_secret FACTORY_API_TOKEN "$t"
-      ok "saved to $ENV_FILE (0600)"
-      warn "RESTART Claude Code before this takes effect"
-      say "MCP servers are resolved at startup, so a token exported into a running"
-      say "session changes nothing — this is the most common 'the tools don't exist' report."
-    else
-      # Empty input NEVER overwrites. Someone who opens the prompt and thinks
-      # better of it must not lose the credential they already had.
-      warn "nothing entered — existing value left untouched"
-    fi
-  else
-    say "skipped — nothing here depends on it"
-  fi
+  offer_asana_token
 }
 
 # ── main ────────────────────────────────────────────────────────────────────
@@ -1195,6 +1073,11 @@ say "platform: $PLATFORM"
 say "you will be asked for your password once, for system packages"
 
 prompt_role
+if [ -z "$(kits_for_role "$ROLE")" ]; then
+  echo "This installer sets up the public plugins (pm-kit, ship-kit) only. Fraction staff:" >&2
+  echo "use the setup guide in the internal repository." >&2
+  exit 2
+fi
 say "role: $ROLE  →  $(kits_for_role "$ROLE")"
 
 phase_prereqs

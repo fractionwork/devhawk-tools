@@ -122,7 +122,7 @@ node ${CLAUDE_PLUGIN_ROOT}/skills/_shared/pm-python.mjs asana_ops.py --hygiene <
 
 What this attaches (per `${CLAUDE_PLUGIN_ROOT}/skills/asana-hygiene/SKILL.md` Step 2):
 
-- **Admins:** Jeremy + Alyssia (required per `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana-conventions.md` → "Required admins").
+- **Admins:** the admins listed under `requiredAdmins` in `~/.devhawk/pm/workspace.json`, at least two (required per `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana-conventions.md` → "Required admins").
 - **8 standard custom fields:** Fraction Priority · Fraction Task Type · Story Points · Task Progress · Release · Sprint · Theme · Feature.
 - **8 standard sections:** INBOX · BACKLOG · TODO · IN PROGRESS · IN REVIEW · READY FOR TESTING · DONE · Ready for Release.
 
@@ -218,7 +218,7 @@ Final report — keep it tight:
   Workspace · Team · Portfolio (if applied)
 
 Standards applied:
-  ✓ Admins: Jeremy, Alyssia
+  ✓ Admins: <the two configured admins>
   ✓ 8 custom fields attached
   ✓ 8 standard sections
   ✓ Release option: Phase 1

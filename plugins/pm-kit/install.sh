@@ -13,7 +13,7 @@
 
 set -euo pipefail
 
-KIT_DIR="$(SRC="${BASH_SOURCE[0]}"; while [ -h "$SRC" ]; do D="$(cd -P "$(dirname "$SRC")" && pwd)"; SRC="$(readlink "$SRC")"; case $SRC in /*) ;; *) SRC="$D/$SRC" ;; esac; done; cd -P "$(dirname "$SRC")" && pwd)"
+KIT_DIR="$(SRC="${BASH_SOURCE[0]}"; while [ -h "$SRC" ]; do D="$(cd -P "$(dirname "$SRC")" && pwd)"; SRC="$(readlink "$SRC")"; case $SRC in (/*) ;; (*) SRC="$D/$SRC" ;; esac; done; cd -P "$(dirname "$SRC")" && pwd)"
 SKILLS_DEST="${CLAUDE_SKILLS_DIR:-$HOME/.claude/skills}"
 
 UNINSTALL=0

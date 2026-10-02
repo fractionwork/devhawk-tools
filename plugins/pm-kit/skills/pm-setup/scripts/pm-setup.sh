@@ -55,8 +55,8 @@ native_path() {
 }
 
 # Resolve this script's directory, following symlinks, without `readlink -f`
-# (GNU-only — absent on stock macOS). Same idiom audit-kit uses.
-SCRIPT_DIR="$(SRC="${BASH_SOURCE[0]}"; while [ -h "$SRC" ]; do D="$(cd -P "$(dirname "$SRC")" && pwd)"; SRC="$(readlink "$SRC")"; case $SRC in /*) ;; *) SRC="$D/$SRC" ;; esac; done; cd -P "$(dirname "$SRC")" && pwd)"
+# (GNU-only — absent on stock macOS). Same idiom the other kit scripts use.
+SCRIPT_DIR="$(SRC="${BASH_SOURCE[0]}"; while [ -h "$SRC" ]; do D="$(cd -P "$(dirname "$SRC")" && pwd)"; SRC="$(readlink "$SRC")"; case $SRC in (/*) ;; (*) SRC="$D/$SRC" ;; esac; done; cd -P "$(dirname "$SRC")" && pwd)"
 SHARED="$(cd -P "$SCRIPT_DIR/../../_shared" && pwd)"
 
 CHECK_ONLY=0; DEPS_ONLY=0; REAUTH=0

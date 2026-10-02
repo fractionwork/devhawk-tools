@@ -44,7 +44,7 @@ UPLOAD_TIMEOUT = 120   # attachment uploads (larger payloads)
 # token exchange but is not truly secret in a CLI (source is readable).
 # Security comes from the user's browser consent + PKCE verifier.
 # The OAuth app identity is NOT shipped. It used to be hardcoded here, which
-# meant it travelled into the public pm-skills marketplace — and it also meant
+# meant it travelled into the public marketplace — and it also meant
 # this module only ever worked against one Asana app.
 #
 # Resolution: env → ~/.devhawk/pm/workspace.json → absent. Absent is fine: the
@@ -886,6 +886,8 @@ def required_admins_map() -> dict:
 STANDARD_SECTIONS = [
     "INBOX", "BACKLOG", "TODO", "WIP", "READY FOR REVIEW",
     "READY FOR TESTING", "READY FOR RELEASE", "DONE",
+    # Captured-but-not-vetted requests, out of INBOX/BACKLOG (board triage).
+    "PARKED",
 ]
 # Sections where we relax field requirements (Priority/Type/Points/Release).
 # INBOX items haven't been discussed with stakeholders yet, so demanding
@@ -1502,7 +1504,7 @@ def elevate_subtasks(project_gid, dry_run=False):
 
 
 # Default owner for generated index projects, from workspace.json.
-JEREMY_GID = _wsg("defaultProjectOwnerGid")
+DEFAULT_OWNER_GID = _wsg("defaultProjectOwnerGid")
 
 
 RELEASE_FIELD_GID = field_gid("Release")

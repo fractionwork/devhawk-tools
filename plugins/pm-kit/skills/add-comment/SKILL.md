@@ -15,20 +15,17 @@ description: >
 
 Post a properly-formatted comment on a single PM card. Per-system formatting rules and validation are baked in so the call doesn't fail at the API.
 
-> **Which surface — decide this FIRST.** Read
-> `${CLAUDE_PLUGIN_ROOT}/skills/_shared/board-surface.md`. A project registered with a
-> factory is worked through the factory MCP, on whichever board it uses; anything else is
-> direct, under your own credential.
+> **Which tools.** Read `${CLAUDE_PLUGIN_ROOT}/skills/_shared/board-surface.md` — it maps
+> each capability below to a tool. Every comment is posted under your own credential.
 
 ## Step 1: Resolve the target card
 
 If the user names the card by ID/permalink/URL, use it directly.
 
 If they reference it by description ("the approver dropdown ticket", "the bug Austin
-filed"), resolve **"search the board"** per `board-surface.md` and score by title overlap.
-On the factory path that is one call whatever the board is; direct, it is the host
-system's own search (Asana `search_tasks`, Linear team issues, Jira JQL via the connected
-Atlassian MCP).
+filed"), resolve **"search the board"** per `board-surface.md` and score by title overlap,
+using the host system's own search (Asana `search_tasks`, Linear team issues, Jira JQL via
+the connected Atlassian MCP).
 
 If multiple matches, list the top 5 with permalinks and ask which one. Don't guess.
 
@@ -113,11 +110,6 @@ If the MCP rejects wiki markup, the error will name ADF. Retry via ADF construct
 
 When the user writes `@<name>` in their input:
 
-0. **On the factory path**, resolve "list assignable people" per `board-surface.md` and
-   match the name against it. That returns board user ids on all three systems. Note the
-   factory posts PLAIN TEXT, so an Asana `@`-mention cannot be rendered as a link — write
-   the person's name and say the mention is not clickable, rather than emitting markup the
-   board will show verbatim.
 1. **Asana, direct** — resolve the user via `node ${CLAUDE_PLUGIN_ROOT}/skills/_shared/pm-python.mjs asana_ops.py --find-user "<name>"` (matches name/email substring; prints `gid<TAB>name<TAB>email` per hit). Disambiguate by full name + email if multiple. Replace `@Jane` with `<a data-asana-gid="<user-gid>">@Jane</a>`. If no match, leave as plain text and warn the user. (User lookup isn't on the curated MCP, so it runs through the script — still first-party.)
 2. **Linear** — search users via MCP. Replace with the form Linear's API expects (typically `@<display-name>`).
 3. **Jira** — Atlassian uses account IDs in mentions: `[~accountid:<id>]` for wiki markup, or the `mention` ADF node. Resolve with the connected Atlassian MCP's account-id lookup (`lookupJiraAccountId`).
@@ -151,17 +143,6 @@ If using wiki markup, no validation. If using ADF, verify the JSON shape matches
 
 ## Step 6: Post the comment
 
-**Resolve the surface first** — `${CLAUDE_PLUGIN_ROOT}/skills/_shared/board-surface.md`.
-
-**Through the factory** (a registered project): the "comment" capability, with
-the project key and the board id. It works on all three systems, uses the
-project's credential rather than yours, and appends a `Source:` line naming you —
-which is the only record of who asked, since the factory posts as a shared
-service account. It posts PLAIN TEXT; if the comment genuinely needs rich HTML
-or an ADF table, use the direct path below and say which you used.
-
-**Direct** (no factory, or a board it does not know):
-
 | System | How |
 |---|---|
 | **Asana** | Prefer our first-party Asana MCP's `add_comment` (plain text). For rich HTML, or if that MCP isn't connected, fall back to `node ${CLAUDE_PLUGIN_ROOT}/skills/_shared/pm-python.mjs asana_ops.py --post-comment <task_gid> '<html>'`. Never use other Asana MCPs (the official plugin / community / claude.ai connectors are superseded). |
@@ -177,10 +158,6 @@ If the post returns an error:
 ## Step 7: Confirm
 
 Report back:
-- **Which surface you used** — "via the factory" or "directly, as you". They are
-  different events on a client's board: one is attributed to you by the engine
-  and used the project's credential, the other was posted by your own account.
-  The person reading should not have to work out which.
 - Card name + permalink
 - Comment permalink (if the API returns one — Asana's `add_comment` returns a story gid, build the URL)
 - Any mentions that were resolved (so the user can verify the right person was tagged)
@@ -188,7 +165,7 @@ Report back:
 
 Example confirmation:
 ```
-✓ Comment posted on "ELEVAT3 - Approver dropdown bug" (https://app.asana.com/...)
+✓ Comment posted on "Acme - Approver dropdown bug" (https://app.asana.com/...)
   Tagged: @Jane Smith
   Stripped: <div class="warn"> (content preserved as plain text)
 ```

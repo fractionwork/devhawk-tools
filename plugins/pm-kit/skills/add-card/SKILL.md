@@ -19,14 +19,10 @@ Create a single PM card with all hygiene rules baked in. Mirror of how `asana-hy
 
 The canonical hygiene rules live in `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana-conventions.md` and `${CLAUDE_PLUGIN_ROOT}/skills/asana-hygiene/SKILL.md`. This skill is the **creation-time enforcement layer** — don't duplicate the rules here, reference them.
 
-> **Which surface — decide this FIRST.** Read
-> `${CLAUDE_PLUGIN_ROOT}/skills/_shared/board-surface.md` and resolve it before Step 1,
-> because it changes every step below. A project registered with a factory is worked
-> through the **factory MCP** — Asana, Linear or Azure DevOps, the project's own
-> credential, every write attributed to you. Anything else is **Asana-direct**, under your
-> own credential.
+> **Which tools.** Read `${CLAUDE_PLUGIN_ROOT}/skills/_shared/board-surface.md` before
+> Step 1 — it maps each capability below to a tool.
 >
-> **Asana-direct tool precedence:** prefer the first-party `asana` MCP
+> **Tool precedence:** prefer the first-party `asana` MCP
 > (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana_mcp.py`); fall back to
 > `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana_ops.py` for anything it doesn't expose or
 > when the MCP isn't connected; do **not** use other Asana MCPs (the official plugin /
@@ -34,23 +30,16 @@ The canonical hygiene rules live in `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana-
 > directly, so it can do anything the MCP can plus what the MCP structurally can't (create
 > fields/sections/tags, upload files via `--attach-file`, archive, etc.). Full precedence +
 > command surface in `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana-conventions.md` → "Tool
-> precedence". **None of it applies on the factory path** — those commands need a local
-> Asana credential a factory user does not have.
+> precedence".
 
 ## Step 1: Resolve the target project
 
-**On the factory path**, the project is a factory project key. Resolve it per
-`${CLAUDE_PLUGIN_ROOT}/skills/_shared/factory.md`: the explicitly chosen
-`~/.devhawk/pm/active-project.json` first, then the git slug if there is a checkout, then
-`list_projects` matched by name. The board behind it may be Asana, Linear or Azure DevOps
-and nothing below needs to care which.
-
-**Asana-direct**, resolve it via the Asana MCP's `list_projects(scope="all")` and match by
-name — the default scope is only the projects you belong to, and a named board you are not
-a member of must still resolve (or `node ${CLAUDE_PLUGIN_ROOT}/skills/_shared/pm-python.mjs asana_ops.py --list-projects`).
+Resolve it via the Asana MCP's `list_projects(scope="all")` and match by name — the
+default scope is only the projects you belong to, and a named board you are not a member
+of must still resolve (or `node ${CLAUDE_PLUGIN_ROOT}/skills/_shared/pm-python.mjs asana_ops.py --list-projects`).
 
 If the user is ambiguous ("add a ticket about X"), check the active project. If still
-unclear, ask: "Which project — ELEVAT3, Paryani Construction, …?"
+unclear, ask which project, naming the ones you found.
 
 ## Step 2: Decide target section — INBOX or BACKLOG
 
@@ -80,10 +69,6 @@ Before any field validation or creation, **search the target project for likely 
 Resolve **"search the board"** per `board-surface.md` and query it with the proposed
 title's significant tokens (drop stopwords: a/the/and/of/to/for/on/in/with/is/are). Take
 the top ~10 hits, excluding finished work.
-
-On the factory path this is one call regardless of board — and if the reply carries
-`truncated: true`, the board was bigger than one scan, so an empty result means "not in
-what was searched" rather than "does not exist". Say which, rather than declaring it new.
 
 ### Scoring — what counts as a likely dupe
 
@@ -169,7 +154,7 @@ For **Asana** (8 standard custom fields per `${CLAUDE_PLUGIN_ROOT}/skills/_share
 | Fraction Priority | leave unset | `P2 — Medium` | If urgency mentioned ("urgent", "critical") → ask P0/P1 |
 | Fraction Task Type | leave unset | Auto-detect: "bug"/"fix" → Bug, "chore"/"cleanup" → Chore, "spike"/"investigate" → Spike, "EPIC:" prefix → EPIC, otherwise Story | Never (override-able later) |
 | Story Points | leave unset | Auto-estimate (mirror `auto_estimate()` in `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asana_ops.py`): trivial=1, small=2, medium=3, large=5, complex=8 | If the user gave one explicitly |
-| Release | leave unset | Active phase. If unknown, default to `Phase 1`. For ELEVAT3 currently: `Phase 2`. | If the project has multiple active phases |
+| Release | leave unset | Active phase. If unknown, default to `Phase 1`. | If the project has multiple active phases |
 | Sprint | none | None unless the user explicitly says "for this sprint" | Only if user mentions a sprint by name |
 | **Feature** (text) | set if known | The epic this supports — **free string**, matched to an existing `Feature` value where one fits (reuse, don't fork the spelling) | If no obvious epic → ask, or set "Feature pending" |
 | **Theme** (text) | set if known | The project's theme/arc — **free string**, reuse an existing Theme value used in this project (don't fork the spelling) | If ambiguous which theme |
@@ -183,30 +168,7 @@ For **INBOX cards specifically**: skip Priority / Task Type / Story Points / Rel
 
 ## Step 5: Create the card
 
-**Resolve the surface first** — `${CLAUDE_PLUGIN_ROOT}/skills/_shared/board-surface.md`.
-The two paths differ in what they can express, so pick before you start rather
-than discovering it halfway.
-
-### Through the factory (a registered project)
-
-`submit_idea(project_key, title, body)`. It creates the board item, creates the
-engine card, and starts the pipeline — a plain board create would leave a card
-the factory never sees, identical on the board and behaving nothing alike.
-
-What this path CANNOT do, and you must say so rather than working around it:
-
-- **It creates in INBOX.** Rich BACKLOG creation with custom fields is Asana-only
-  script work (below). For a factory project, create in INBOX and let the
-  INBOX → BACKLOG promotion conversation fill the fields in — which is the
-  intended flow anyway, and matches the lighter pre-flight above.
-- **It cannot stamp the workspace tag** (Marker A, Step 6.5). Note it and carry
-  on; Marker B, the description footer, still applies and is the one audit
-  scripts parse.
-
-Then move it if the human asked for a specific column: `board_move_item`, which
-takes a column name including ones the factory has no state for.
-
-### Asana-direct (no factory, or a board it does not know)
+### Asana
 
 `node ${CLAUDE_PLUGIN_ROOT}/skills/_shared/pm-python.mjs asana_ops.py --create-task '<json>'` (or pipe the spec with `--create-task -`). The spec carries `name`, `notes`, `projects` (the resolved project gid), `section` (`"BACKLOG"` or `"INBOX"` — resolved within the project), `custom_fields` (`{field_gid: value}` — only those required for the target section per Step 4, **including `Feature`**), `sprint` (`[enum_option_gid]` — applied via a follow-up PUT since multi_enum can't be set on create), and `audit_tag: true` (stamps Marker A — see Step 6.5 — automatically). One call creates the task, places it in the section, applies the fields, and tags it; it prints `{ok, task_gid, permalink, warnings}`. The curated `asana` MCP **deliberately omits raw task creation** (it exposes only `capture_inbox_idea` for light INBOX capture), so rich BACKLOG creation runs through the script — still first-party, never a third-party Asana MCP.
 
@@ -218,11 +180,8 @@ Per `feedback_pm_source_attribution.md` and `asana-hygiene` Step 7 — **two-ste
 
 1. Description includes a `Source: …` line at the bottom (per the format library in `asana-hygiene` Step 7).
 2. Post a comment on the new card quoting the specific source content — resolve
-   "comment" per `board-surface.md`. On the factory path the comment additionally
-   carries a `Source:` line naming YOU, added by the engine and not suppressible;
-   that is provenance for *who ran the skill*, which is a different fact from the
-   `Source:` line above (*where the requirement came from*). Both belong there.
-   Asana-direct with rich HTML: `node ${CLAUDE_PLUGIN_ROOT}/skills/_shared/pm-python.mjs asana_ops.py --post-comment <gid> '<body>...</body>'`.
+   "comment" per `board-surface.md`. With rich HTML:
+   `node ${CLAUDE_PLUGIN_ROOT}/skills/_shared/pm-python.mjs asana_ops.py --post-comment <gid> '<body>...</body>'`.
 
 Even when the user says "I just thought of this" — record it: `Source: ad-hoc — user request 2026-04-27`. The trail's value is consistency, not just provenance. **For INBOX cards this rule is non-negotiable** — without source attribution, an INBOX item is just untraced noise.
 
@@ -238,7 +197,6 @@ Attach the well-known label `devhawk:add-card` to the new card. If the label/tag
 |---|---|
 | **Asana** | Handled automatically by Step 5: `--create-task` stamps the tag when `audit_tag: true` (the default) — it ensures the workspace tag exists, then attaches it. To (re)create the tag standalone, run `node ${CLAUDE_PLUGIN_ROOT}/skills/_shared/pm-python.mjs asana_ops.py --ensure-audit-tag` (idempotent; prints the gid). The curated MCP can attach an existing tag but cannot create workspace tags, which is why this lives in the script. Cache the gid in `.devhawk-work.json` for reuse. |
 | **Linear** | Issue label. Linear's MCP can create labels directly — call its create-issue-label capability for `devhawk:add-card` if missing, then include the label id on creation. |
-| **Through the factory** | Not available — label and tag creation is not on the connector interface, on purpose (it would put board-admin reach into a project-shared credential). Say so once and rely on Marker B, which is what the audit scripts read. |
 
 ### Marker B — description footer (machine-parseable, survives label removal)
 
@@ -282,43 +240,6 @@ After creation, report:
 - One follow-up offer:
   - INBOX: "Want me to schedule a stakeholder discussion comment when that conversation happens?"
   - BACKLOG (sprint in flight): "Want to commit this to the active sprint?"
-
-## Step 7.5: The factory already knows — say so, do not duplicate
-
-Only if this repo is a **registered factory project**. Read
-`${CLAUDE_PLUGIN_ROOT}/skills/_shared/factory.md` for the contract; an
-unregistered project skips this in silence.
-
-**Do NOT create a second card.** The card you just made is on the board, and the
-factory intakes from the board on its own poll. Creating one through the factory
-too would produce two cards for one request — the exact duplication `add-card`'s
-whole dedup step exists to prevent.
-
-What to do instead is tell the human **whether the factory will pick it up**,
-because the answer is usually "no" and the reason is invisible from the board:
-
-```
-get_project_config(project_key)
-```
-
-- **An intake gate is set** (e.g. `Release ∈ {July Release}`) and this card does
-  not carry that value → the factory will NOT see it. Say so, and offer to set
-  the field. This is the single most common surprise: the card is on the board,
-  it looks fine, and nothing ever happens to it.
-- **The card landed in INBOX** → it is in the factory's intake column, and the
-  next poll will consider it.
-- **The card landed in BACKLOG** → most intake paths only read INBOX, so the
-  factory will likely never pick it up. Correct for work a human is going to do;
-  worth saying out loud if they expected otherwise.
-
-One line, not a lecture:
-
-> `factory:` this project gates intake on **Release = July Release**. This card
-> has no Release set, so the factory will not pick it up. Want me to set it?
-
-**If the call fails or hangs, drop it silently.** The card is already created and
-correct — that was the job. A factory that is down, unreachable or not configured
-must never turn a successful `add-card` into something that looks failed.
 
 ## Project hygiene assumptions
 

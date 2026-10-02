@@ -81,7 +81,7 @@ When starting a story (next-task):
 If the project predates the heading format:
 ```markdown
 - [ ] E1-S1: Sign up flow (3 SP) @unassigned
-- [x] E1-S2: Sign in flow (2 SP) @jeremy — done
+- [x] E1-S2: Sign in flow (2 SP) @alex — done
 ```
 
 `next-task` auto-detects: if any `### [E` headings exist, use heading format. Otherwise fall back to flat bullets.

@@ -1,0 +1,35 @@
+# Line endings.
+#
+# THE PLUGINS ARE INSTALLED AS A GIT CLONE, ON THE USER'S MACHINE, WITH THE
+# USER'S GIT CONFIG. Git for Windows installs with core.autocrlf=true by
+# default, so without these rules every shell script in this repo reaches a
+# Windows user with CRLF endings — and bash reads the trailing \r as part of the
+# command: `set -u` fails as `set: -: invalid option`, and values carry a stray
+# \r that breaks comparisons without any error at all. That covers every skill
+# script in every kit, and pm-kit's SessionStart hook.
+#
+# `text eol=lf` pins LF in the working tree on every platform, whatever
+# core.autocrlf says, and binaries are still detected and left alone.
+#
+# EVERYTHING, not only shell scripts. The first version of this file pinned just
+# the scripts, and the Windows CI job found the rest the same day: a shebang
+# `.mjs` checked out CRLF fails to load under vitest ("Invalid or unexpected
+# token" — its shebang stripping does not expect \r), and every SKILL.md
+# frontmatter reader written as /^---\n/ finds nothing. This repo is authored
+# on Linux and read by tools that assume \n; Windows editors handle LF fine.
+
+* text=auto eol=lf
+
+# The one kind of file that genuinely needs CRLF.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Anything bash runs.
+*.sh            text eol=lf
+*.bash          text eol=lf
+*.sh.disabled   text eol=lf
+**/.githooks/** text eol=lf
+
+# make treats a trailing \r in a recipe as part of the command.
+Makefile        text eol=lf
+*.mk            text eol=lf

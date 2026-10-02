@@ -44,11 +44,23 @@ attribution rules at creation time.
 Full text: `${CLAUDE_PLUGIN_ROOT}/skills/_shared/operating-rules.md`
 EOF
 
-# jq is not a dependency of this kit, so build the JSON with python3 (already
-# required by the Asana MCP) and fall back to emitting nothing rather than
-# emitting malformed JSON, which would surface as a hook error every session.
-if command -v python3 >/dev/null 2>&1; then
-  RULES="$RULES" python3 -c '
+# jq is not a dependency of this kit, so build the JSON with a runtime the kit
+# already needs. NODE FIRST: pm-kit's Asana server is launched with node, so it
+# is on every working machine — whereas `python3` is absent from a python.org
+# install on native Windows (only `python.exe`), and there the name can even
+# resolve to the Microsoft Store stub, which prints nothing and exits non-zero.
+# Each candidate's output is captured and printed only if it produced some, so
+# a stub can never emit half a hook; with no runtime at all this prints nothing
+# rather than malformed JSON, which would surface as a hook error every session.
+emit() {  # <interpreter> <code>
+  command -v "$1" >/dev/null 2>&1 || return 1
+  local out
+  out="$(RULES="$RULES" "$1" -c "$2" 2>/dev/null)" || return 1
+  [ -n "$out" ] || return 1
+  printf '%s\n' "$out"
+}
+
+PY='
 import json, os
 print(json.dumps({
     "hookSpecificOutput": {
@@ -56,4 +68,16 @@ print(json.dumps({
         "additionalContext": os.environ["RULES"],
     }
 }))'
-fi
+
+node_emit() {
+  command -v node >/dev/null 2>&1 || return 1
+  local out
+  out="$(RULES="$RULES" node -e '
+process.stdout.write(JSON.stringify({
+  hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: process.env.RULES },
+}));' 2>/dev/null)" || return 1
+  [ -n "$out" ] || return 1
+  printf '%s\n' "$out"
+}
+
+node_emit || emit python3 "$PY" || emit python "$PY" || true

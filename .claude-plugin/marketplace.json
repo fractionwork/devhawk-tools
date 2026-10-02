@@ -1,5 +1,5 @@
 {
-  "name": "pm-skills",
+  "name": "devhawk-tools",
   "owner": {
     "name": "HireFraction"
   },
@@ -8,6 +8,11 @@
       "name": "pm-kit",
       "source": "./plugins/pm-kit",
       "description": "Claude Code skills for project-board management with Fraction hygiene applied at the point of writing: create a single card correctly (INBOX vs BACKLOG, Feature, standard custom fields, duplicate check, source attribution), post correctly-formatted comments, bootstrap a new Asana project to standard, audit and fix an existing Asana board. Ships a first-party Asana MCP server. Use for \"add a ticket\", \"log a bug\", \"track this\", \"clean up the board\", \"asana hygiene\", \"enrich the backlog\", \"create an Asana project\"."
+    },
+    {
+      "name": "ship-kit",
+      "source": "./plugins/ship-kit",
+      "description": "Claude Code skills for the card-to-merge loop AND for running tests locally: pick the next task off the board and branch for it, implement a feature to the project's conventions, generate tests, open a pull request, review a PR (lint + typecheck + deterministic convention audit + the code-review plugin), watch open PRs and surface only the actionable ones, triage the daily security-scan brief, and close the card out after merge. Also runs the tests ad hoc: unit, api (integration) and e2e suites with a one-page results summary, and UAT — acceptance criteria driven through a real browser as a user would, returning a per-criterion pass/fail/unclear verdict with evidence and screenshots. Browser runs are headless by default and always say so; --headed shows the window. Stack-agnostic — the deterministic checks self-skip on repos they don't apply to. Use for \"what's next\", \"create a pr\", \"review this pr\", \"watch open prs\", \"write tests\", \"run the tests\", \"run uat\", \"card done\"."
     }
   ]
 }

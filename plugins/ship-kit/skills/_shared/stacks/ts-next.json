@@ -1,0 +1,33 @@
+{
+  "id": "ts-next",
+  "language": "typescript",
+  "displayName": "Next.js + Drizzle",
+  "migrationTool": "drizzle-kit",
+  "commands": {
+    "install": "pnpm install --frozen-lockfile",
+    "lint": "pnpm lint",
+    "typecheck": "pnpm typecheck",
+    "gate": "pnpm check",
+    "test": "pnpm test:run",
+    "test:unit": "pnpm test:unit",
+    "test:integration": "pnpm test:integration",
+    "test:e2e": "pnpm test:e2e",
+    "dev": "pnpm dev",
+    "db:generate": "pnpm db:generate",
+    "db:migrate": "pnpm db:migrate",
+    "db:migrate:test": "pnpm db:migrate:test",
+    "deps:update": "pnpm up"
+  },
+  "paths": {
+    "excludeFromConventionChecks": [
+      "tests/",
+      "lib/db/migrations/meta/",
+      "node_modules/",
+      ".next/",
+      "playwright-report/"
+    ],
+    "migrations": "lib/db/migrations",
+    "sourceExtensions": [".ts", ".tsx", ".mts", ".cts"]
+  },
+  "auditChecks": "audit"
+}

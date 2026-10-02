@@ -1,0 +1,187 @@
+{
+  "//": "Shared fixtures for board-triage-rules.md. Both implementations (pm-kit board_triage.py and factory-engine packages/agents/src/board-triage.ts) must produce exactly `expect` for every case. Cards not listed in `expect` are not asserted. `now` and the defaults below apply unless a case overrides them.",
+  "defaults": {
+    "now": "2026-10-02T00:00:00Z",
+    "config": {
+      "inboxDays": 21,
+      "backlogDays": 45,
+      "decisionDays": 14,
+      "similarity": 0.6,
+      "keepTag": "keep",
+      "snoozeDays": 30,
+      "recentTouchDays": 14,
+      "intakeGateValues": ["July Release", "Beta"]
+    }
+  },
+  "cases": [
+    {
+      "name": "an inbox card idle past inboxDays is stale",
+      "cards": [{ "id": "c1", "state": "INBOX", "title": "Rate shop alert emails", "createdAt": "2026-09-01T00:00:00Z" }],
+      "expect": { "c1": { "flag": true, "reason": "stale" } }
+    },
+    {
+      "name": "a young inbox card is fresh",
+      "cards": [{ "id": "c1", "state": "INBOX", "title": "Rate shop alert emails", "createdAt": "2026-09-25T00:00:00Z" }],
+      "expect": { "c1": { "flag": false, "reason": "fresh" } }
+    },
+    {
+      "name": "human activity resets the idle clock",
+      "cards": [{ "id": "c1", "state": "INBOX", "title": "Rate shop alert emails", "createdAt": "2026-08-01T00:00:00Z", "lastHumanActivityAt": "2026-09-20T00:00:00Z" }],
+      "expect": { "c1": { "flag": false, "reason": "fresh" } }
+    },
+    {
+      "name": "backlog uses the longer backlogDays window",
+      "cards": [
+        { "id": "young", "state": "BACKLOG", "title": "Hotel onboarding checklist", "createdAt": "2026-08-25T00:00:00Z" },
+        { "id": "old", "state": "BACKLOG", "title": "Scraper retry dashboard", "createdAt": "2026-08-01T00:00:00Z" }
+      ],
+      "expect": {
+        "young": { "flag": false, "reason": "fresh" },
+        "old": { "flag": true, "reason": "stale" }
+      }
+    },
+    {
+      "name": "a card inside the intake gate is exempt however old",
+      "cards": [{ "id": "c1", "state": "INBOX", "title": "Rate shop alert emails", "createdAt": "2026-07-01T00:00:00Z", "release": "Beta" }],
+      "expect": { "c1": { "flag": false, "reason": "exempt:release" } }
+    },
+    {
+      "name": "a release outside the gate does not exempt",
+      "cards": [{ "id": "c1", "state": "INBOX", "title": "Rate shop alert emails", "createdAt": "2026-07-01T00:00:00Z", "release": "Someday" }],
+      "expect": { "c1": { "flag": true, "reason": "stale" } }
+    },
+    {
+      "name": "an open pull request exempts",
+      "cards": [{ "id": "c1", "state": "BACKLOG", "title": "Rate shop alert emails", "createdAt": "2026-07-01T00:00:00Z", "hasOpenPr": true }],
+      "expect": { "c1": { "flag": false, "reason": "exempt:open-pr" } }
+    },
+    {
+      "name": "the keep tag exempts, case-insensitively",
+      "cards": [{ "id": "c1", "state": "INBOX", "title": "Rate shop alert emails", "createdAt": "2026-07-01T00:00:00Z", "tags": ["Keep"] }],
+      "expect": { "c1": { "flag": false, "reason": "exempt:keep" } }
+    },
+    {
+      "name": "an objection snoozes the card for snoozeDays, then it can be flagged again",
+      "cards": [
+        { "id": "snoozed", "state": "INBOX", "title": "Rate shop alert emails", "createdAt": "2026-07-01T00:00:00Z", "keptAt": "2026-09-20T00:00:00Z" },
+        { "id": "expired", "state": "INBOX", "title": "Scraper retry dashboard", "createdAt": "2026-07-01T00:00:00Z", "keptAt": "2026-08-01T00:00:00Z" }
+      ],
+      "expect": {
+        "snoozed": { "flag": false, "reason": "exempt:snoozed" },
+        "expired": { "flag": true, "reason": "stale" }
+      }
+    },
+    {
+      "name": "assigned and recently touched is exempt; assigned alone is not",
+      "cards": [
+        { "id": "active", "state": "BACKLOG", "title": "Rate shop alert emails", "createdAt": "2026-07-01T00:00:00Z", "assigned": true, "lastHumanActivityAt": "2026-09-28T00:00:00Z" },
+        { "id": "idle", "state": "BACKLOG", "title": "Scraper retry dashboard", "createdAt": "2026-07-01T00:00:00Z", "assigned": true }
+      ],
+      "expect": {
+        "active": { "flag": false, "reason": "exempt:active" },
+        "idle": { "flag": true, "reason": "stale" }
+      }
+    },
+    {
+      "name": "a decision waiting decisionDays with no answer is flagged",
+      "cards": [
+        { "id": "waiting", "state": "NEEDS_DECISION", "title": "Rate shop alert emails", "createdAt": "2026-06-01T00:00:00Z", "enteredStateAt": "2026-09-10T00:00:00Z" },
+        { "id": "answered", "state": "NEEDS_DECISION", "title": "Scraper retry dashboard", "createdAt": "2026-06-01T00:00:00Z", "enteredStateAt": "2026-09-10T00:00:00Z", "lastHumanActivityAt": "2026-09-20T00:00:00Z" },
+        { "id": "recent", "state": "NEEDS_DECISION", "title": "Hotel onboarding checklist", "createdAt": "2026-06-01T00:00:00Z", "enteredStateAt": "2026-09-25T00:00:00Z" }
+      ],
+      "expect": {
+        "waiting": { "flag": true, "reason": "unanswered-decision" },
+        "answered": { "flag": false, "reason": "fresh" },
+        "recent": { "flag": false, "reason": "fresh" }
+      }
+    },
+    {
+      "name": "a decision card is only checked for the decision signal, not duplicates or staleness",
+      "cards": [
+        { "id": "survivor", "state": "BACKLOG", "title": "Cancellation velocity heat map on dashboard", "createdAt": "2026-09-20T00:00:00Z" },
+        { "id": "decision", "state": "NEEDS_DECISION", "title": "Add cancellation velocity heat map to dashboard", "createdAt": "2026-09-28T00:00:00Z", "enteredStateAt": "2026-09-28T00:00:00Z" }
+      ],
+      "expect": { "decision": { "flag": false, "reason": "fresh" } }
+    },
+    {
+      "name": "a card a DONE card already covers is superseded",
+      "cards": [{ "id": "c1", "state": "INBOX", "title": "Export reservations to CSV", "createdAt": "2026-09-30T00:00:00Z" }],
+      "done": [{ "id": "done-1", "title": "CSV export for reservations" }],
+      "expect": { "c1": { "flag": true, "reason": "superseded", "survivorId": "done-1" } }
+    },
+    {
+      "name": "of two duplicates only the newer is flagged; the older survives",
+      "cards": [
+        { "id": "older", "state": "BACKLOG", "title": "Cancellation velocity heat map on dashboard", "createdAt": "2026-09-20T00:00:00Z" },
+        { "id": "newer", "state": "INBOX", "title": "Add cancellation velocity heat map to dashboard", "createdAt": "2026-09-28T00:00:00Z" }
+      ],
+      "expect": {
+        "older": { "flag": false, "reason": "fresh" },
+        "newer": { "flag": true, "reason": "duplicate", "survivorId": "older" }
+      }
+    },
+    {
+      "name": "a duplicate tie on createdAt flags the larger id",
+      "cards": [
+        { "id": "a", "state": "INBOX", "title": "Cancellation velocity heat map on dashboard", "createdAt": "2026-09-28T00:00:00Z" },
+        { "id": "b", "state": "INBOX", "title": "Add cancellation velocity heat map to dashboard", "createdAt": "2026-09-28T00:00:00Z" }
+      ],
+      "expect": {
+        "a": { "flag": false, "reason": "fresh" },
+        "b": { "flag": true, "reason": "duplicate", "survivorId": "a" }
+      }
+    },
+    {
+      "name": "a card that repeats committed work is a duplicate of it",
+      "cards": [
+        { "id": "ready", "state": "READY", "title": "Cancellation velocity heat map on dashboard", "createdAt": "2026-09-20T00:00:00Z" },
+        { "id": "inbox", "state": "INBOX", "title": "Add cancellation velocity heat map to dashboard", "createdAt": "2026-09-28T00:00:00Z" }
+      ],
+      "expect": { "inbox": { "flag": true, "reason": "duplicate", "survivorId": "ready" } }
+    },
+    {
+      "name": "parked and done cards are not open duplicates",
+      "cards": [
+        { "id": "parked", "state": "PARKED", "title": "Cancellation velocity heat map on dashboard", "createdAt": "2026-09-20T00:00:00Z" },
+        { "id": "inbox", "state": "INBOX", "title": "Add cancellation velocity heat map to dashboard", "createdAt": "2026-09-28T00:00:00Z" }
+      ],
+      "expect": { "inbox": { "flag": false, "reason": "fresh" } }
+    },
+    {
+      "name": "unrelated titles are not duplicates",
+      "cards": [
+        { "id": "a", "state": "INBOX", "title": "Cancellation velocity heat map on dashboard", "createdAt": "2026-09-20T00:00:00Z" },
+        { "id": "b", "state": "INBOX", "title": "Rate shop alert emails", "createdAt": "2026-09-28T00:00:00Z" }
+      ],
+      "expect": {
+        "a": { "flag": false, "reason": "fresh" },
+        "b": { "flag": false, "reason": "fresh" }
+      }
+    },
+    {
+      "name": "duplicate wins over stale when both apply",
+      "cards": [
+        { "id": "older", "state": "BACKLOG", "title": "Cancellation velocity heat map on dashboard", "createdAt": "2026-06-01T00:00:00Z" },
+        { "id": "newer", "state": "BACKLOG", "title": "Add cancellation velocity heat map to dashboard", "createdAt": "2026-07-01T00:00:00Z" }
+      ],
+      "expect": {
+        "older": { "flag": true, "reason": "stale" },
+        "newer": { "flag": true, "reason": "duplicate", "survivorId": "older" }
+      }
+    },
+    {
+      "name": "committed work is never considered",
+      "cards": [
+        { "id": "ready", "state": "READY", "title": "Rate shop alert emails", "createdAt": "2026-01-01T00:00:00Z" },
+        { "id": "wip", "state": "IN_PROGRESS", "title": "Scraper retry dashboard", "createdAt": "2026-01-01T00:00:00Z" }
+      ],
+      "expect": {}
+    },
+    {
+      "name": "per-project thresholds override the defaults",
+      "config": { "inboxDays": 7 },
+      "cards": [{ "id": "c1", "state": "INBOX", "title": "Rate shop alert emails", "createdAt": "2026-09-23T00:00:00Z" }],
+      "expect": { "c1": { "flag": true, "reason": "stale" } }
+    }
+  ]
+}

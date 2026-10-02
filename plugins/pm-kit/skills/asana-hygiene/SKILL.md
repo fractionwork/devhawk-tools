@@ -30,7 +30,7 @@ node ${CLAUDE_PLUGIN_ROOT}/skills/_shared/pm-python.mjs asana_ops.py --hygiene <
 ```
 
 This runs the full audit and auto-fixes:
-- **Admins:** adds Jeremy + Alyssia if missing
+- **Admins:** adds the admins configured under `requiredAdmins` in `~/.devhawk/pm/workspace.json` if missing
 - **Custom fields:** attaches 8 standard fields (Priority, Task Type, Story Points, Task Progress, Release, Sprint, Theme, Feature)
 - **Sections:** creates missing standard sections (INBOX → DONE)
 - **Asana's placeholder section:** every project is created with an auto-named section

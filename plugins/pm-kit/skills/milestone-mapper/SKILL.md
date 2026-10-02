@@ -7,19 +7,15 @@ description: >
   Linear — and, where connected, Fireflies meeting transcripts. Triggers on phrases
   like "milestone tracker", "milestone map", "create a milestone progress page", "build a
   status tracker", or "generate a gantt". NOT for changing the board — this skill only
-  READS; use add-card / add-comment to write. NOT for a per-card status reply, which is
-  what the factory's own digest already does.
+  READS; use add-card / add-comment to write. NOT for a per-card status reply.
 ---
 
 # Milestone Mapper
 
-> **Which surface — decide this FIRST.** Read
-> `${CLAUDE_PLUGIN_ROOT}/skills/_shared/board-surface.md`. A project registered with a
-> factory is read through the factory MCP, on whichever board it uses; anything else is
-> direct, under your own credential. This skill only reads, so the stakes are lower than
-> for a write — but reading a client's board under YOUR credential rather than the
-> project's still misses whatever your account cannot see, which is how a tracker comes
-> out quietly incomplete rather than visibly broken.
+> **Which tools.** Read `${CLAUDE_PLUGIN_ROOT}/skills/_shared/board-surface.md` — it maps
+> each capability below to a tool. Everything is read under your own credential, so the
+> tracker can only show what your account can see; if it looks thin, check access before
+> concluding the board is empty.
 
 Generate a standalone HTML milestone tracker — a client-facing or internal status page that tells the story: **what shipped → where we are → where we're going → what's blocked**.
 
@@ -38,15 +34,11 @@ Gather what you need before generating anything. Ask the user:
 5. **Team** — who's working on this? (names + color coding for assignee column if needed)
 6. **Data sources** — which are connected: the project board, Fireflies, GitHub?
 
-   **The board is Asana or Linear.** Both through the factory when the project is
-   registered with one; Asana also directly, through pm-kit's own server.
+   **The board is Asana (through pm-kit's own server) or Linear (through its MCP).**
 
    Nothing else. Say so plainly if somebody asks for Jira, Shortcut or Azure DevOps
-   rather than planning a tracker around a source you cannot read. (A `shortcut` value
-   sat in the engine's PM enum for months with nothing behind it: a project configured
-   with it parsed, registered, showed green, and failed silently on every board
-   operation. Advertising a source that cannot be read is that same mistake at the skill
-   layer, and it costs somebody a tracker that is empty for reasons nobody can see.)
+   rather than planning a tracker around a source you cannot read — a tracker that is
+   empty for reasons nobody can see is worse than no tracker.
 7. **Output location** — local file only, or push to a GitHub repo?
 
 If a Fireflies transcript ID or meeting name is provided, pull it immediately to extract priorities and context.
@@ -71,15 +63,6 @@ the call for each, so this reads the same against Asana and Linear.
 - Pull blocked items
 - Note ticket IDs for source attribution
 
-**Themes are a first-class thing here, not a lucky custom field.** A factory-registered
-project carries its theme taxonomy in `pm.themes`, kept in step with the board by
-`sync_themes`, and the board's own options are readable without guessing. Ask the factory
-for them rather than scraping field settings, and fall back to reading the custom field
-directly only on the Asana-direct path. (Do not confuse `pm.themes`, the taxonomy this
-groups by, with `pm.theme` — the singular discriminator that says which slice of a SHARED
-board belongs to this project. Grouping by the discriminator would produce a tracker with
-one track.)
-
 **If the project has themes:** use them as the grouping key for all sections — Release Notes cards, Gantt rows, and priority list items should all use Theme names as track names. Query completed tasks filtered by Theme to build Release Notes groups. This replaces manual milestone-to-ticket mapping.
 
 - Fetch the Theme custom field GID from the project's custom field settings
@@ -91,9 +74,8 @@ one track.)
 - If no Theme field exists, infer track from ticket title/epic
 - Count total tickets shipped this period — if 20+, surface that count prominently
 - Sum story points for completed work, per track and in total (Asana: the "Story Points"
-  custom field; Linear: the estimate; a factory-registered project exposes points through
-  the factory the same way). Points and task counts matter to different readers — gather
-  both whenever the board has both
+  custom field; Linear: the estimate). Points and task counts matter to different
+  readers — gather both whenever the board has both
 - Identify items that are "on the radar" but not yet scheduled
 
 ---
@@ -149,7 +131,7 @@ External blockers outside the team's control. Confirm blocker details and who ow
 Generate a single self-contained HTML file. Follow all layout and CSS patterns below exactly.
 
 ### File naming
-`[client-slug]-milestone-progress.html` — e.g., `spinxpress-milestone-progress.html`, `elevat3-milestone-progress.html`
+`[client-slug]-milestone-progress.html` — e.g., `acme-milestone-progress.html`
 
 ### Output location
 Default: `[filename]` in the current project directory

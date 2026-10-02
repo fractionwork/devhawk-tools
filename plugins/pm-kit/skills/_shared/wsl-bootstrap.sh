@@ -5,7 +5,7 @@
 # people's notes point at it, and a bookmarked one-liner that 404s is worse than
 # one that redirects. Anyone running the old command gets the current script.
 #
-#   curl -fsSL https://raw.githubusercontent.com/fractionwork/pm-skills/main/plugins/pm-kit/skills/_shared/wsl-bootstrap.sh -o /tmp/wsl-setup.sh
+#   curl -fsSL https://raw.githubusercontent.com/fractionwork/devhawk-tools/main/plugins/pm-kit/skills/_shared/wsl-bootstrap.sh -o /tmp/wsl-setup.sh
 #   bash /tmp/wsl-setup.sh
 #
 # WHY IT WENT. factory-setup.sh is a strict superset — the same interop check,
@@ -22,7 +22,7 @@
 
 set -uo pipefail
 
-TARGET_URL="https://raw.githubusercontent.com/fractionwork/pm-skills/main/plugins/pm-kit/skills/_shared/factory-setup.sh"
+TARGET_URL="https://raw.githubusercontent.com/fractionwork/devhawk-tools/main/plugins/pm-kit/skills/_shared/factory-setup.sh"
 HERE="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOCAL="$HERE/factory-setup.sh"
 
