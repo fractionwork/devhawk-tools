@@ -28,9 +28,14 @@ Only cards in **INBOX**, **BACKLOG** or **NEEDS_DECISION**. Committed work
 
 ## Signals, checked in order. The first match flags the card.
 
-**Human activity** means a comment, a field change or a section move by a
-person. Factory and bot comments never count; neither does the triage flag
-itself. With no recorded activity, the card's creation time stands in.
+**Human activity** means a person showing intent about the card: a comment, a
+section move, an assignment, a title, description or due-date edit, or adding
+it to the project. **Custom-field changes do not count**, and neither do events
+the board can't name. They are overwhelmingly bulk edits: on the first real
+board, one person clearing a priority field across 56 cards made every one of
+them look freshly touched, when clearing a priority is closer to the opposite
+of vetting. Factory and bot activity never counts, and neither does the triage
+flag itself. With no qualifying activity, the card's creation time stands in.
 
 ### 1. Unanswered decision (NEEDS_DECISION only)
 
